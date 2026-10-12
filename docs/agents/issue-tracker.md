@@ -2,6 +2,12 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
+## Ticket branches
+
+- Before changing files for a ticket, create or reuse its dedicated `issue-<number>-<short-slug>` branch, such as `issue-1-headless-movement`, unless the user specifies another branch.
+- Use the branch's issue number to find the originating ticket/spec when implementing or reviewing work.
+- Commit subjects describe the change; include ticket numbers only when explicitly requested.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.

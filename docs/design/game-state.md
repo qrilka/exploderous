@@ -177,10 +177,12 @@ An immutable restart definition and mutable current terrain have different roles
 
 Use one small shared interface for frontends and checks:
 
-1. Construct a scenario and rules through validation.
+1. Construct validated rules and a validated scenario, then instantiate a game with its starting tick.
 2. Advance the entire game by exactly one tick with an input frame.
 3. Inspect a read-only observation.
 4. Clone complete in-memory simulation state for an independent continuation.
+
+Scenario validation binds starting object placement to the scenario's rules. `Game::new(scenario, initial_tick)` takes ownership of those validated values without replacing rules or repeating validation; only the game stores and advances the tick. See [Scenario and Game](../../GLOSSARY.md) for the domain distinction.
 
 Keep mutable storage private. Scenario data may be authored externally, but only validated construction creates live state. Tests use that same construction/step interface; no privileged setters that bypass invariants. Valid scenarios need not come with a full replay proving reachability.
 
