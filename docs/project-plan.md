@@ -24,9 +24,9 @@ Exploderous keeps Normal, Battle, and Versus as separate gameplay presets. Battl
 | --- | --- | --- |
 | Rust skeleton | Minimal Cargo project and runnable placeholder executable | Build/run succeeds; CI runs formatting, Clippy, and tests |
 | Movement and collision | Headless arena and integer sub-cell movement with an explicit character footprint | Rule tests cover body bounds, clear-path progress, and whole-path stopping at obstacles; compare bounded scenarios against an independent movement reference |
-| One-bomb mechanics | Placement, fuse, blasts, block destruction | Rule tests cover placement restrictions, timing, propagation, and lingering hazards |
-| Complete first level | Exit objective, death, victory, explicit restart | A scripted successful playthrough completes the arena; tests cover death-before-victory and restoration on restart |
-| Basic TUI | Terminal input/output and real-time pacing around the same core | Terminal play can complete and restart the level; exiting restores the terminal |
+| Movement TUI playtest | Keyboard input, visible sub-cell movement, and real-time pacing around the movement core | In a compatible terminal, a human can navigate, stop, turn, reset, and quit; normal exit and handled failures restore the terminal |
+| One-bomb mechanics | Placement, fuse, blasts, block destruction; extend the existing TUI to exercise them | Rule tests cover placement restrictions, timing, propagation, and lingering hazards |
+| Complete first level | Exit objective, death, victory, explicit restart, integrated into the TUI | Scripted and terminal play can complete and restart the arena; tests cover death-before-victory and restoration on restart |
 
 Each slice gets specific behavior and verification acceptance criteria before implementation. It is complete only when those criteria pass. Do not build empty advanced-testing harnesses into the skeleton.
 
@@ -39,6 +39,20 @@ Implement terrain, validated rules/scenario construction, one human-controlled c
 Do not scaffold dormant enemy variants, bombs, blast/item collections, an exit field, AI/RNG state, networking, or generic adapters in this slice. Those parts of the full design are implemented with their corresponding gameplay features.
 
 The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) resolves the initial movement parameters and defines concrete validation/error acceptance criteria. Implement its worked movement cases, rejected-input state preservation, replay/cloning checks, and bounded comparison against the independent movement reference through the shared whole-game interface. Advanced-tool setup remains separate explicit verification work.
+
+### Following slice: movement TUI playtest
+
+After the movement slice, build a minimal TUI around the same validated construction, tick-input, and read-only observation interface. This is a movement playground, not yet a complete Normal level:
+
+- One fixed classic arena with corridors, walls, and a few blocks; one character.
+- Real-time pacing at the movement spec's nominal tick rate, independent of rendering. The frontend supplies tick frames; the core remains the sole owner of movement and collision.
+- A display that makes sub-cell movement visible, plus a small readout of position, movement distance, and footprint side length. Display rounding must not change simulation coordinates.
+- Direction controls, reset by constructing a fresh game, clean exit, and safe terminal-resize handling. Clear held-input state on reset.
+- No bombs, objectives, arena editor, random generation, menus, or generic frontend framework. Add later mechanics to this TUI as their core slices arrive.
+
+Require [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) support, including event-type reporting and reporting all keys as escape codes. This supplies press/repeat/release events even for unmodified letter keys. Require the capabilities, not a particular terminal application; any intermediary such as a terminal multiplexer must preserve them. Negotiate and verify the required enhancements at startup. Unsupported environments get an actionable error and terminal cleanup, not an OS-key-repeat fallback. Movement follows held-key state derived from press/release events; autorepeat does not control simulation speed. Restore the previous keyboard mode and other terminal state on normal exit and handled failures.
+
+Before implementation, the TUI slice spec must settle held-key conflicts, display resolution and minimum size, resize/focus behavior, pacing/catch-up policy, and the test seam. Its human-playtest gate complements automated rule checks; scoped Kani and mutation-testing work remains interleaved as described below.
 
 ## First level
 
