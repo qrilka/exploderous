@@ -4,11 +4,9 @@ A Bomberman-clone in Rust with a focus on correctness through different testing 
 
 ## Development
 
-Install stable Rust with `rustfmt` and `clippy` using [rustup](https://rustup.rs/):
+Install [rustup](https://rustup.rs/). Cargo commands automatically provision the Rust version, `rustfmt`, and `clippy` pinned in `rust-toolchain.toml`, both locally and in CI:
 
 ```sh
-rustup toolchain install stable --profile minimal --component rustfmt,clippy
-rustup default stable
 cargo run --locked
 cargo fmt --all -- --check
 cargo clippy --all-targets --locked -- -D warnings
