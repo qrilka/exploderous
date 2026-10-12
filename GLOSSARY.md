@@ -25,6 +25,12 @@ A computer-controlled character, including both AI-controlled competitors and en
 The grid-shaped playing area containing terrain, characters, bombs, and other gameplay objects.
 _Avoid_: Map, board
 
+**Scenario**:
+An authored starting arena, its initial objects and positions, and the rules of play. It is a starting definition, not ongoing state or elapsed game time.
+
+**Game**:
+One simulation instance of a scenario, with its own evolving arena, objects, and game time.
+
 **Cell**:
 One square area of an arena's terrain grid. A character can occupy parts of several cells at once.
 _Avoid_: Tile
