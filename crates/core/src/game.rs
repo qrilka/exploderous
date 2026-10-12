@@ -39,7 +39,8 @@ pub struct Character {
     pub position: Position,
 }
 
-/// Authored data; only `Game::new` can turn it into live state.
+/// Raw authored input, not a validated domain value.
+/// `Game::new` parses the terrain and checks the character's footprint in that arena.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scenario {
     pub width: u32,
@@ -49,19 +50,41 @@ pub struct Scenario {
     pub initial_tick: u64,
 }
 
-/// Fixed for a game's lifetime. Distances are integer world units.
+/// Validated rules, fixed for a game's lifetime. Distances are integer world units.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MovementRules {
-    pub footprint_side: u32,
-    pub movement_distance: u32,
+    footprint_side: u32,
+    movement_distance: u32,
+}
+
+impl MovementRules {
+    /// Parse an even footprint side in 2..=254 and a movement distance in 1..=1024.
+    /// If both are invalid, the footprint error takes priority.
+    pub fn new(footprint_side: u32, movement_distance: u32) -> Result<Self, ConstructionError> {
+        if !(2..=254).contains(&footprint_side) || !footprint_side.is_multiple_of(2) {
+            return Err(ConstructionError::InvalidFootprintSide);
+        }
+        if !(1..=1024).contains(&movement_distance) {
+            return Err(ConstructionError::InvalidMovementDistance);
+        }
+        Ok(Self {
+            footprint_side,
+            movement_distance,
+        })
+    }
+
+    pub fn footprint_side(&self) -> u32 {
+        self.footprint_side
+    }
+
+    pub fn movement_distance(&self) -> u32 {
+        self.movement_distance
+    }
 }
 
 impl Default for MovementRules {
     fn default() -> Self {
-        Self {
-            footprint_side: 192,
-            movement_distance: 16,
-        }
+        Self::new(192, 16).expect("default movement rules are valid")
     }
 }
 
@@ -105,6 +128,24 @@ pub struct Arena {
 }
 
 impl Arena {
+    fn new(width: u32, height: u32, terrain: Vec<Terrain>) -> Result<Self, ConstructionError> {
+        if !(1..=256).contains(&width) || !(1..=256).contains(&height) {
+            return Err(ConstructionError::InvalidDimensions);
+        }
+        let cell_count = width
+            .checked_mul(height)
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or(ConstructionError::InvalidDimensions)?;
+        if terrain.len() != cell_count {
+            return Err(ConstructionError::TerrainLengthMismatch);
+        }
+        Ok(Self {
+            width,
+            height,
+            terrain,
+        })
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -145,7 +186,8 @@ struct Rect {
 }
 
 impl Rect {
-    fn footprint(position: Position, half_side: i64) -> Self {
+    fn footprint(position: Position, rules: MovementRules) -> Self {
+        let half_side = i64::from(rules.footprint_side / 2);
         Self {
             left: i64::from(position.x) - half_side,
             top: i64::from(position.y) - half_side,
@@ -165,41 +207,18 @@ pub struct Game {
 }
 
 impl Game {
+    /// Parse raw scenario data using already-valid rules. Rejection priority is
+    /// dimensions, terrain length, then the starting footprint's placement.
     pub fn new(scenario: Scenario, rules: MovementRules) -> Result<Self, ConstructionError> {
-        use ConstructionError::*;
-        if !(1..=256).contains(&scenario.width) || !(1..=256).contains(&scenario.height) {
-            return Err(InvalidDimensions);
-        }
-        let cell_count = scenario
-            .width
-            .checked_mul(scenario.height)
-            .and_then(|count| usize::try_from(count).ok())
-            .ok_or(InvalidDimensions)?;
-        if scenario.terrain.len() != cell_count {
-            return Err(TerrainLengthMismatch);
-        }
-        if !(2..=254).contains(&rules.footprint_side) || !rules.footprint_side.is_multiple_of(2) {
-            return Err(InvalidFootprintSide);
-        }
-        if !(1..=1024).contains(&rules.movement_distance) {
-            return Err(InvalidMovementDistance);
-        }
-        let arena = Arena {
-            width: scenario.width,
-            height: scenario.height,
-            terrain: scenario.terrain,
-        };
-        let footprint = Rect::footprint(
-            scenario.character.position,
-            i64::from(rules.footprint_side / 2),
-        );
+        let arena = Arena::new(scenario.width, scenario.height, scenario.terrain)?;
+        let footprint = Rect::footprint(scenario.character.position, rules);
         if footprint.left < 0
             || footprint.top < 0
             || footprint.right > i64::from(arena.width) * i64::from(WORLD_UNITS_PER_CELL)
             || footprint.bottom > i64::from(arena.height) * i64::from(WORLD_UNITS_PER_CELL)
             || arena.obstructions(footprint).next().is_some()
         {
-            return Err(InvalidStartingPosition);
+            return Err(ConstructionError::InvalidStartingPosition);
         }
         Ok(Self {
             arena,
@@ -238,7 +257,7 @@ impl Game {
         let cell = i64::from(WORLD_UNITS_PER_CELL);
         let mut x = i64::from(self.character.position.x);
         let mut y = i64::from(self.character.position.y);
-        let mut swept = Rect::footprint(self.character.position, half);
+        let mut swept = Rect::footprint(self.character.position, self.rules);
         // Clip to the arena, then inspect every cell with positive-area swept overlap.
         // Cardinal motion leaves the perpendicular interval unchanged, so each such
         // obstacle limits the centre to its near face plus/minus the footprint radius.
@@ -363,14 +382,26 @@ mod tests {
         assert_eq!(game.arena().height(), 1);
         assert_eq!(game.arena().terrain(), authored.terrain);
         assert_eq!(game.character(), &authored.character);
-        assert_eq!(
-            game.rules(),
-            &MovementRules {
-                footprint_side: 192,
-                movement_distance: 16
-            }
-        );
+        assert_eq!(game.rules(), &MovementRules::new(192, 16).unwrap());
         assert_eq!(game.clone(), game);
+    }
+
+    #[test]
+    fn movement_rules_construction_rejects_invalid_values_in_contract_order() {
+        for side in [0, 1, 3, 191, 255, 256, 258, u32::MAX] {
+            for distance in [0, 16] {
+                assert_eq!(
+                    MovementRules::new(side, distance),
+                    Err(ConstructionError::InvalidFootprintSide)
+                );
+            }
+        }
+        for distance in [0, 1025, u32::MAX] {
+            assert_eq!(
+                MovementRules::new(192, distance),
+                Err(ConstructionError::InvalidMovementDistance)
+            );
+        }
     }
 
     #[test]
@@ -383,56 +414,14 @@ mod tests {
             bad.width = width;
             bad.height = height;
             bad.terrain.clear();
-            assert_eq!(
-                Game::new(
-                    bad,
-                    MovementRules {
-                        footprint_side: 0,
-                        movement_distance: 0
-                    }
-                ),
-                Err(InvalidDimensions)
-            );
+            bad.character.position.x = i32::MIN;
+            assert_eq!(Game::new(bad, defaults), Err(InvalidDimensions));
         }
         for terrain in [vec![], vec![Terrain::Floor; 2]] {
             let mut bad = base.clone();
             bad.terrain = terrain;
-            assert_eq!(
-                Game::new(
-                    bad,
-                    MovementRules {
-                        footprint_side: 0,
-                        movement_distance: 0
-                    }
-                ),
-                Err(TerrainLengthMismatch)
-            );
-        }
-        for side in [0, 1, 3, 191, 255, 256, 258, u32::MAX] {
-            assert_eq!(
-                Game::new(
-                    base.clone(),
-                    MovementRules {
-                        footprint_side: side,
-                        movement_distance: 0
-                    }
-                ),
-                Err(InvalidFootprintSide)
-            );
-        }
-        for distance in [0, 1025, u32::MAX] {
-            let mut bad = base.clone();
             bad.character.position.x = i32::MIN;
-            assert_eq!(
-                Game::new(
-                    bad,
-                    MovementRules {
-                        footprint_side: 192,
-                        movement_distance: distance
-                    }
-                ),
-                Err(InvalidMovementDistance)
-            );
+            assert_eq!(Game::new(bad, defaults), Err(TerrainLengthMismatch));
         }
         for position in [
             Position { x: -1, y: 128 },
@@ -498,14 +487,8 @@ mod tests {
                 );
                 authored.character.id = CharacterId::new(u32::MAX);
                 authored.initial_tick = u64::MAX;
-                let game = Game::new(
-                    authored,
-                    MovementRules {
-                        footprint_side: side,
-                        movement_distance: distance,
-                    },
-                )
-                .unwrap();
+                let game =
+                    Game::new(authored, MovementRules::new(side, distance).unwrap()).unwrap();
                 assert_eq!(game.tick(), u64::MAX);
                 assert_eq!(game.character().id.value(), u32::MAX);
             }
@@ -551,10 +534,7 @@ mod tests {
     #[test]
     fn swept_footprints_stop_at_the_first_obstruction_without_a_gap_or_sideways_motion() {
         use Direction::*;
-        let fast = MovementRules {
-            footprint_side: 192,
-            movement_distance: 512,
-        };
+        let fast = MovementRules::new(192, 512).unwrap();
         let cases = [
             (
                 rows(&[".#.."], 128, 128),
@@ -606,19 +586,13 @@ mod tests {
             ),
             (
                 rows(&["..#..+.."], 128, 128),
-                MovementRules {
-                    movement_distance: 1024,
-                    ..fast
-                },
+                MovementRules::new(192, 1024).unwrap(),
                 Right,
                 Position { x: 416, y: 128 },
             ),
             (
                 rows(&["..#.+..."], 1920, 128),
-                MovementRules {
-                    movement_distance: 1024,
-                    ..fast
-                },
+                MovementRules::new(192, 1024).unwrap(),
                 Left,
                 Position { x: 1376, y: 128 },
             ),
@@ -646,10 +620,7 @@ mod tests {
         ] {
             let mut game = Game::new(
                 rows(&["."], 128, 128),
-                MovementRules {
-                    footprint_side: 192,
-                    movement_distance: 1024,
-                },
+                MovementRules::new(192, 1024).unwrap(),
             )
             .unwrap();
             assert_step(&mut game, &[command(direction)], expected);
@@ -665,10 +636,7 @@ mod tests {
                     65536 - radius - 1,
                     radius + 1,
                 ),
-                MovementRules {
-                    footprint_side: side,
-                    movement_distance: 1024,
-                },
+                MovementRules::new(side, 1024).unwrap(),
             )
             .unwrap();
             assert_step(
@@ -869,7 +837,7 @@ mod tests {
     // Independent reference: enumerate ALL terrain rectangles and measure positive-area
     // overlap directly. No production geometry, cell query, or advancement helper is used.
     fn reference_legal(authored: &Scenario, rules: MovementRules, position: Position) -> bool {
-        let radius = i64::from(rules.footprint_side / 2);
+        let radius = i64::from(rules.footprint_side() / 2);
         let (left, right) = (
             i64::from(position.x) - radius,
             i64::from(position.x) + radius,
@@ -909,7 +877,7 @@ mod tests {
             Direction::Left => (-1, 0),
         };
         let mut position = authored.character.position;
-        for _ in 0..rules.movement_distance {
+        for _ in 0..rules.movement_distance() {
             let next = Position {
                 x: position.x + dx,
                 y: position.y + dy,
@@ -952,10 +920,7 @@ mod tests {
                     for &y in &coordinates {
                         let authored = scenario(2, 2, terrain.clone(), x, y);
                         for distance in [1, 16, 255, 256, 257, 1024] {
-                            let rules = MovementRules {
-                                footprint_side: side,
-                                movement_distance: distance,
-                            };
+                            let rules = MovementRules::new(side, distance).unwrap();
                             let constructed = Game::new(authored.clone(), rules);
                             if !reference_legal(&authored, rules, authored.character.position) {
                                 assert_eq!(
@@ -1057,22 +1022,10 @@ mod tests {
         }
         for rules in [
             MovementRules::default(),
-            MovementRules {
-                footprint_side: 2,
-                movement_distance: 1,
-            },
-            MovementRules {
-                footprint_side: 128,
-                movement_distance: 257,
-            },
-            MovementRules {
-                footprint_side: 192,
-                movement_distance: 512,
-            },
-            MovementRules {
-                footprint_side: 254,
-                movement_distance: 1024,
-            },
+            MovementRules::new(2, 1).unwrap(),
+            MovementRules::new(128, 257).unwrap(),
+            MovementRules::new(192, 512).unwrap(),
+            MovementRules::new(254, 1024).unwrap(),
         ] {
             let mut game = Game::new(authored.clone(), rules).unwrap();
             let mut replay = Game::new(authored.clone(), rules).unwrap();

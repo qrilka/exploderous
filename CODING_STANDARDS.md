@@ -1,5 +1,12 @@
 # Coding standards
 
+## Rust types and invariants
+
+- Follow **parse, don't validate**: convert raw input into types that carry validity guarantees through constructors or `TryFrom`. Downstream code should rely on those guarantees rather than repeat the checks.
+- Keep fields private when unrestricted construction or mutation could violate invariants. Provide explicit constructors and read-only accessors; any mutation must preserve validity.
+- Use newtypes when they enforce useful constraints or prevent mixing distinct domain concepts. Do not wrap primitives without a concrete benefit.
+- Distinguish raw input from validated domain values. Check context-dependent relationships when constructing the owning aggregate, and test rejection at the constructor that owns each invariant.
+
 ## Documentation review
 
 Review documentation by responsibility:
