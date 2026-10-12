@@ -371,7 +371,8 @@ mod tests {
         assert_eq!(*game, expected_game, "frame={frame:?}");
     }
 
-    fn rows(rows: &[&str], x: i32, y: i32) -> ScenarioInput {
+    fn rows(input: &str, x: i32, y: i32) -> ScenarioInput {
+        let rows: Vec<_> = input.trim().lines().collect();
         assert!(rows.iter().all(|row| row.len() == rows[0].len()));
         scenario(
             u32::try_from(rows[0].len()).unwrap(),
@@ -601,61 +602,97 @@ mod tests {
         let fast = MovementRules::new(192, 512).unwrap();
         let cases = [
             (
-                rows(&[".#.."], 128, 128),
+                rows(".#..", 128, 128),
                 fast,
                 Right,
                 Position { x: 160, y: 128 },
             ),
             (
-                rows(&[".+.."], 128, 128),
+                rows(".+..", 128, 128),
                 fast,
                 Right,
                 Position { x: 160, y: 128 },
             ),
             (
-                rows(&["..#."], 896, 128),
+                rows("..#.", 896, 128),
                 fast,
                 Left,
                 Position { x: 864, y: 128 },
             ),
             (
-                rows(&["..+."], 896, 128),
+                rows("..+.", 896, 128),
                 fast,
                 Left,
                 Position { x: 864, y: 128 },
             ),
             (
-                rows(&[".", "#", ".", "."], 128, 128),
+                rows(
+                    r#"
+.
+#
+.
+.
+"#,
+                    128,
+                    128,
+                ),
                 fast,
                 Down,
                 Position { x: 128, y: 160 },
             ),
             (
-                rows(&[".", "+", ".", "."], 128, 128),
+                rows(
+                    r#"
+.
++
+.
+.
+"#,
+                    128,
+                    128,
+                ),
                 fast,
                 Down,
                 Position { x: 128, y: 160 },
             ),
             (
-                rows(&[".", ".", "#", "."], 128, 896),
+                rows(
+                    r#"
+.
+.
+#
+.
+"#,
+                    128,
+                    896,
+                ),
                 fast,
                 Up,
                 Position { x: 128, y: 864 },
             ),
             (
-                rows(&[".", ".", "+", "."], 128, 896),
+                rows(
+                    r#"
+.
+.
++
+.
+"#,
+                    128,
+                    896,
+                ),
                 fast,
                 Up,
                 Position { x: 128, y: 864 },
             ),
             (
-                rows(&["..#..+.."], 128, 128),
+                rows("..#..+..", 128, 128),
                 MovementRules::new(192, 1024).unwrap(),
                 Right,
                 Position { x: 416, y: 128 },
             ),
             (
-                rows(&["..#.+..."], 1920, 128),
+                rows("..#.+...", 1920, 128),
                 MovementRules::new(192, 1024).unwrap(),
                 Left,
                 Position { x: 1376, y: 128 },
@@ -668,7 +705,7 @@ mod tests {
             assert_step(&mut game, &[], expected);
         }
         let mut approaching = Game::new(
-            rows(&[".#.."], 128, 128)
+            rows(".#..", 128, 128)
                 .parse(MovementRules::default())
                 .unwrap(),
             0,
@@ -687,7 +724,7 @@ mod tests {
             (Direction::Left, Position { x: 96, y: 128 }),
         ] {
             let mut game = Game::new(
-                rows(&["."], 128, 128)
+                rows(".", 128, 128)
                     .parse(MovementRules::new(192, 1024).unwrap())
                     .unwrap(),
                 0,
@@ -746,12 +783,18 @@ mod tests {
 
     #[test]
     fn off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_character() {
-        let classic = [
-            "#######", "#.....#", "#.#.#.#", "#.....#", "#.#.#.#", "#.....#", "#######",
-        ];
+        let classic = r#"
+#######
+#.....#
+#.#.#.#
+#.....#
+#.#.#.#
+#.....#
+#######
+"#;
         for x in [352, 416] {
             let mut game = Game::new(
-                rows(&classic, x, 640)
+                rows(classic, x, 640)
                     .parse(MovementRules::default())
                     .unwrap(),
                 0,
@@ -760,12 +803,12 @@ mod tests {
         }
         for x in [351, 417] {
             assert_eq!(
-                rows(&classic, x, 640).parse(MovementRules::default()),
+                rows(classic, x, 640).parse(MovementRules::default()),
                 Err(ConstructionError::InvalidStartingPosition)
             );
         }
         let mut turn = Game::new(
-            rows(&classic, 400, 417)
+            rows(classic, 400, 417)
                 .parse(MovementRules::default())
                 .unwrap(),
             0,
@@ -792,9 +835,16 @@ mod tests {
         );
 
         let mut corner = Game::new(
-            rows(&["..", ".#"], 160, 160)
-                .parse(MovementRules::default())
-                .unwrap(),
+            rows(
+                r#"
+..
+.#
+"#,
+                160,
+                160,
+            )
+            .parse(MovementRules::default())
+            .unwrap(),
             0,
         );
         assert_step(
@@ -803,9 +853,16 @@ mod tests {
             Position { x: 176, y: 160 },
         );
         let mut blocked_corner = Game::new(
-            rows(&["..", ".#"], 160, 161)
-                .parse(MovementRules::default())
-                .unwrap(),
+            rows(
+                r#"
+..
+.#
+"#,
+                160,
+                161,
+            )
+            .parse(MovementRules::default())
+            .unwrap(),
             0,
         );
         assert_step(
@@ -814,9 +871,16 @@ mod tests {
             Position { x: 160, y: 161 },
         );
         let mut spanning = Game::new(
-            rows(&["..", ".."], 256, 256)
-                .parse(MovementRules::default())
-                .unwrap(),
+            rows(
+                r#"
+..
+..
+"#,
+                256,
+                256,
+            )
+            .parse(MovementRules::default())
+            .unwrap(),
             0,
         );
         assert_step(
@@ -825,9 +889,16 @@ mod tests {
             Position { x: 256, y: 272 },
         );
         let mut perpendicular = Game::new(
-            rows(&[".#.", "..."], 384, 352)
-                .parse(MovementRules::default())
-                .unwrap(),
+            rows(
+                r#"
+.#.
+...
+"#,
+                384,
+                352,
+            )
+            .parse(MovementRules::default())
+            .unwrap(),
             0,
         );
         assert_step(
@@ -875,7 +946,7 @@ mod tests {
                 StepError::DuplicateCommand,
             ),
         ];
-        let scenario = rows(&[".."], 128, 128)
+        let scenario = rows("..", 128, 128)
             .parse(MovementRules::default())
             .unwrap();
         for tick in [0, u64::MAX] {
@@ -911,7 +982,7 @@ mod tests {
                 Position { x: 160, y: 128 },
             ),
         ] {
-            let authored = rows(&[".#"], start, 128);
+            let authored = rows(".#", start, 128);
             let mut game = Game::new(
                 authored.parse(MovementRules::default()).unwrap(),
                 u64::MAX - 1,
@@ -920,7 +991,7 @@ mod tests {
             assert_eq!(game.tick(), u64::MAX);
             assert_rejected(&mut game, &frame, StepError::TickExhausted);
         }
-        let mut authored = rows(&[".."], 128, 128);
+        let mut authored = rows("..", 128, 128);
         authored.character.id = CharacterId::new(0);
         let mut game = Game::new(authored.parse(MovementRules::default()).unwrap(), 0);
         assert_step(
@@ -1069,9 +1140,15 @@ mod tests {
     fn deterministic_sequences_preserve_invariants_and_clones_continue_independently() {
         use Direction::*;
         let authored = rows(
-            &[
-                "#######", "#.....#", "#.#.#.#", "#..+..#", "#.#.#.#", "#.....#", "#######",
-            ],
+            r#"
+#######
+#.....#
+#.#.#.#
+#..+..#
+#.#.#.#
+#.....#
+#######
+"#,
             384,
             384,
         );
