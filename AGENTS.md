@@ -22,9 +22,7 @@ Use the single-context layout. See `docs/agents/domain.md`.
 
 ## Design interviews
 
-Before asking for a technical decision, explain unfamiliar terms in plain language with a concrete example. For representation or geometry choices, show a small diagram or code sketch.
-
-Before final confirmation of a system design, show the complete model and interactions covering every required domain object, including objects outside the first delivery slice. Distinguish settled relationships from open rules.
+When a noticeable change leaves materially different design choices open, or a technical decision or system design needs discussion, read `docs/agents/design-interviews.md`.
 
 ## Questionnaires
 

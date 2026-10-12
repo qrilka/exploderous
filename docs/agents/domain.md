@@ -38,6 +38,10 @@ Multi-context repo (presence of `GLOSSARY-MAP.md` at the root):
         └── docs/adr/
 ```
 
+## Before changing a domain model
+
+Read the relevant design document alongside the ticket/spec. Check that the named domain objects, field ownership, and lifecycle relationships fit the established model. If the relationship is absent or the sources conflict, present concrete interpretations and ask the user before coding; update the document that owns the resolved decision.
+
 ## Use the glossary's vocabulary
 
 When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `GLOSSARY.md`. Don't drift to synonyms the glossary explicitly avoids.
