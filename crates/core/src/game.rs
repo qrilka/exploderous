@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn movement_rules_construction_rejects_invalid_values_in_contract_order() {
+    fn movement_rules_reject_invalid_values_with_footprint_errors_first() {
         for side in [0, 1, 3, 191, 255, 256, 258, u32::MAX] {
             for distance in [0, 16] {
                 assert_eq!(
@@ -405,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn construction_rejects_invalid_data_in_contract_order_and_accepts_limits() {
+    fn game_construction_rejects_invalid_scenarios_and_accepts_limits() {
         use ConstructionError::*;
         let base = scenario(1, 1, vec![Terrain::Floor], 128, 128);
         let defaults = MovementRules::default();
