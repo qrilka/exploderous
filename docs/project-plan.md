@@ -38,7 +38,7 @@ Implement terrain, validated rules/scenario construction, one human-controlled c
 
 Do not scaffold dormant enemy variants, bombs, blast/item collections, an exit field, AI/RNG state, networking, or generic adapters in this slice. Those parts of the full design are implemented with their corresponding gameplay features.
 
-Before implementation, resolve the [open movement parameters](design/game-state.md#open-design-decisions) in the slice spec and define concrete validation/error acceptance criteria. Require worked movement cases, rejected-input state preservation, replay/cloning checks, and bounded comparison against the independent movement reference. Advanced-tool setup remains separate explicit verification work.
+The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) resolves the initial movement parameters and defines concrete validation/error acceptance criteria. Implement its worked movement cases, rejected-input state preservation, replay/cloning checks, and bounded comparison against the independent movement reference through the shared whole-game interface. Advanced-tool setup remains separate explicit verification work.
 
 ## First level
 

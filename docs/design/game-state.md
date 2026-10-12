@@ -2,7 +2,7 @@
 
 Agreed representation and behavioral contract for the headless core. See the [project plan](../project-plan.md), [glossary](../../GLOSSARY.md), and [representation ADR](../adr/0002-grid-terrain-and-positioned-objects.md).
 
-Characters use integer sub-cell positions and movement. Rust sketches below explain data relationships rather than complete declarations. Names such as `Cell`, `Tick`, and identity types denote distinct concepts; numeric choices not yet settled are listed under [Open design decisions](#open-design-decisions).
+Characters use integer sub-cell positions and movement. Rust sketches below explain data relationships rather than complete declarations. Names such as `Cell`, `Tick`, and identity types denote distinct concepts. The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) defines the initial movement scale, defaults, limits, and validation/error contract; remaining choices are listed under [Open design decisions](#open-design-decisions).
 
 ## Terrain grid
 
@@ -33,10 +33,28 @@ Characters, bombs, blasts, items, and the exit do not replace terrain values. Fo
 
 The outside of the arena is solid. A surrounding ring of wall cells is not required by storage; small test arenas may have floor at their edges.
 
+### Classic arena layout
+
+Classic arenas use an odd-sized playable interior surrounded by a one-cell ring of walls. Wall pillars occur at every other interior row and column: with zero-based interior coordinates, both coordinates are odd. With the outer ring included, both pillar coordinates are even. The other interior cells form corridors and may contain floor or authored blocks. This is not a checkerboard of isolated floor cells.
+
+For example, `#` denotes a wall and `.` denotes floor:
+
+```text
+#######
+#.....#
+#.#.#.#
+#.....#
+#.#.#.#
+#.....#
+#######
+```
+
+Odd interior dimensions let the alternating pattern begin and end with corridors; adding two border cells preserves odd total dimensions. This is a classic layout rule, not a universal terrain-storage invariant. General scenario construction also accepts valid even-sized rectangles and layouts without a wall ring. Concrete level layouts choose their playable size.
+
 ## Characters and precise positions
 
 ```rust
-// Illustrative representation; world-unit scale is not chosen yet.
+// Centre coordinates; the movement spec defines the scale and limits.
 struct Position {
     x: i32,
     y: i32,
@@ -49,13 +67,13 @@ struct Character {
 }
 ```
 
-Position is the character's centre in integer world units, not a terrain cell coordinate. One fixed scale relates world units to cell size. For illustration only, with 16 units per cell, centres `(24, 24)` and `(29, 24)` both lie in cell `(1, 1)`.
+Position is the character's centre in integer world units, not a terrain cell coordinate or a screen pixel. The origin is the arena's outer top-left corner; X increases rightward and Y downward. One fixed scale relates world units to cell side length. Cell assignment uses consecutive lower-inclusive, upper-exclusive intervals; a footprint can span several cells regardless of its centre's cell.
 
-The initial bomber's footprint is a square whose sides remain horizontal and vertical. It is smaller than a cell so one-cell-wide corridors allow some positioning error. For a 16-unit passage spanning coordinates 16 through 32, a 12-unit body fits with its centre anywhere from 22 to 26; a 16-unit body requires centre 24 exactly. These numbers explain clearance, not final gameplay constants.
+The initial bomber's footprint is a square whose sides remain horizontal and vertical. Its side length is smaller than a cell so one-cell-wide corridors allow some positioning error. The allowed deviation from a corridor's centreline is half the difference between the cell and footprint side lengths. Rectangles overlap only when their intersections have positive length on both axes; edge or corner contact alone is safe.
 
 Movement:
 
-- Receives one cardinal direction per character per tick, with displacement determined by the game's rules.
+- Receives at most one cardinal direction per character per tick, with displacement determined by the game's rules. A command applies only to its tick; omission means no movement, not continuation of a remembered direction. Frontends represent held input with repeated tick commands. Initial movement parameters are fixed at construction; later dynamic effects require explicit gameplay rules.
 - Checks the entire path of the footprint, not merely its centre or destination. Stop at the furthest legal position at the first obstacle; exact edge contact is allowed, penetration is not.
 - Keeps the complete footprint inside arena bounds and outside terrain forbidden by that character's rules.
 - Does not automatically align to corridor centres or move sideways along obstacles. Any turn assistance would be an additional movement rule, not an implicit collision adjustment.
@@ -166,9 +184,9 @@ Use one small shared interface for frontends and checks:
 
 Keep mutable storage private. Scenario data may be authored externally, but only validated construction creates live state. Tests use that same construction/step interface; no privileged setters that bypass invariants. Valid scenarios need not come with a full replay proving reachability.
 
-Validate dimensions, cell-count arithmetic/storage length, coordinate ranges and footprint placement, rule parameters, unique identities and references, and explicit resource ceilings. Kind-specific relationships are part of the validation contract. Invalid input must be reported, not turned into indexing panics or silently wrapped arithmetic. Numeric ceilings remain open; the Kani harness's smaller bounds are not the game's maximum size.
+Validate dimensions, cell-count arithmetic/storage length, coordinate ranges and footprint placement, rule parameters, unique identities and references, and explicit resource ceilings. Kind-specific relationships are part of the validation contract. Invalid input must be reported, not turned into indexing panics or silently wrapped arithmetic. Initial movement ceilings are defined in the movement spec; limits for later objects remain open. The Kani harness's smaller bounds are not the game's maximum size.
 
-One frame contains at most one movement direction and, when supported, a placement request for each addressed character. Missing human input means no action; an empty valid frame still advances time. Externally submitted commands target human-controlled characters. NPC decisions run within the deterministic simulation using explicit AI/random state.
+One frame contains at most one movement direction and, when supported, a placement request for each addressed character. Missing human input means no action; an empty valid frame still advances time unless the tick counter is exhausted. The movement spec defines atomic rejection at that numeric limit. Externally submitted commands target human-controlled characters. NPC decisions run within the deterministic simulation using explicit AI/random state.
 
 Reject duplicate commands, unknown identities, and external commands targeting NPCs before any tick, AI, or random-state advancement. A valid blocked action is ordinary gameplay: movement may stop partway, a failed placement has no placement effect, and time still advances. Input enumeration order must not affect results. Processing order and random consumption must be explicit rather than accidental collection order.
 
@@ -200,8 +218,8 @@ Object-interaction properties include release of bomb capacity while a blast per
 
 ## Open design decisions
 
-- Movement parameters: world-unit scale, integer widths/ranges, footprint size, displacement per tick, tick rate, numeric resource ceilings, and exact accepted input/error behavior.
-- Temporal rules: fuse and blast lifetime/phase boundaries and resource-exhaustion behavior.
+- Additional movement rules for later character kinds or dynamic effects; initial movement parameters and input/errors are defined in the movement slice spec.
+- Temporal rules: fuse and blast lifetime/phase boundaries and bomb/blast resource-exhaustion behavior.
 - Multi-character interactions: conflicting moves, swaps, and contact rules.
 - AI: decision ordering and random-consumption conventions.
 - Objectives and items: additional completion conditions, power-up catalog/effects, item destruction/reveal behavior, multiple-item policies, and pickup conflicts.
