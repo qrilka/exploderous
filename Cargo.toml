@@ -1,3 +1,8 @@
+[workspace]
+members = ["crates/core"]
+default-members = [".", "crates/core"]
+resolver = "3"
+
 [package]
 name = "exploderous"
 version = "0.1.0"
