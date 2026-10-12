@@ -1,0 +1,5 @@
+# Grid terrain and separately positioned objects
+
+Exploderous stores rectangular terrain separately from characters and other objects. Terrain uses a row-major vector; characters use stable identities and integer sub-cell centre positions with explicit footprints. Bombs/items and the exit remain cell-anchored, while each live blast records its own coverage and lifetime. See the [game-state design](../design/game-state.md).
+
+We chose this over mutually exclusive occupied-cell values, character records owned by cells, or a fixed-size verification-only world: a character may span cells, stand on its bomb, encounter overlapping blasts, and uncover a block-hidden exit/item. This requires explicit overlap/collision rules and initially linear object scans, but avoids duplicating positions or changing terrain types for every combination. The same production routines serve gameplay and bounded checks; fixed arrays are not mandated without proof-cost evidence. No ECS, plugin framework, one-field feature wrapper, or speculative collections are introduced in the next movement slice.

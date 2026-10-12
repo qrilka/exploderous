@@ -20,5 +20,6 @@ The executable is currently a placeholder, with one temporary smoke test. CI run
 Start with a headless game core and basic TUI; expand gameplay and local competitive modes incrementally. Graphics, networking, and browser support will be evaluated as the project develops.
 
 - [Project plan](docs/project-plan.md)
+- [Game-state and simulation design](docs/design/game-state.md)
 - [Gameplay glossary](GLOSSARY.md)
 - [Headless core decision](docs/adr/0001-headless-deterministic-core.md)
