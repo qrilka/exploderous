@@ -8,9 +8,9 @@ Before creating a commit, read and follow `docs/agents/commit-attribution.md`.
 
 ## Agent skills
 
-### Issue tracker
+### Issue tracker and ticket branches
 
-Issues are tracked in GitHub Issues via `gh`. See `docs/agents/issue-tracker.md`.
+Before starting ticket work, read `docs/agents/issue-tracker.md` for GitHub issue tracking and branch workflow.
 
 ### Triage labels
 
