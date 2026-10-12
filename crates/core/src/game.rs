@@ -39,15 +39,43 @@ pub struct Character {
     pub position: Position,
 }
 
-/// Raw authored input, not a validated domain value.
-/// `Game::new` parses the terrain and checks the character's footprint in that arena.
+/// Validated initial state, including the rules used to check footprint placement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scenario {
-    pub width: u32,
-    pub height: u32,
-    pub terrain: Vec<Terrain>,
-    pub character: Character,
-    pub initial_tick: u64,
+    arena: Arena,
+    character: Character,
+    initial_tick: u64,
+    rules: MovementRules,
+}
+
+impl Scenario {
+    /// Parse authored data using valid rules. Rejection priority is dimensions,
+    /// terrain length, then the starting footprint's placement.
+    pub fn new(
+        width: u32,
+        height: u32,
+        terrain: Vec<Terrain>,
+        character: Character,
+        initial_tick: u64,
+        rules: MovementRules,
+    ) -> Result<Self, ConstructionError> {
+        let arena = Arena::new(width, height, terrain)?;
+        let footprint = Rect::footprint(character.position, rules);
+        if footprint.left < 0
+            || footprint.top < 0
+            || footprint.right > i64::from(arena.width) * i64::from(WORLD_UNITS_PER_CELL)
+            || footprint.bottom > i64::from(arena.height) * i64::from(WORLD_UNITS_PER_CELL)
+            || arena.obstructions(footprint).next().is_some()
+        {
+            return Err(ConstructionError::InvalidStartingPosition);
+        }
+        Ok(Self {
+            arena,
+            character,
+            initial_tick,
+            rules,
+        })
+    }
 }
 
 /// Validated rules, fixed for a game's lifetime. Distances are integer world units.
@@ -207,25 +235,14 @@ pub struct Game {
 }
 
 impl Game {
-    /// Parse raw scenario data using already-valid rules. Rejection priority is
-    /// dimensions, terrain length, then the starting footprint's placement.
-    pub fn new(scenario: Scenario, rules: MovementRules) -> Result<Self, ConstructionError> {
-        let arena = Arena::new(scenario.width, scenario.height, scenario.terrain)?;
-        let footprint = Rect::footprint(scenario.character.position, rules);
-        if footprint.left < 0
-            || footprint.top < 0
-            || footprint.right > i64::from(arena.width) * i64::from(WORLD_UNITS_PER_CELL)
-            || footprint.bottom > i64::from(arena.height) * i64::from(WORLD_UNITS_PER_CELL)
-            || arena.obstructions(footprint).next().is_some()
-        {
-            return Err(ConstructionError::InvalidStartingPosition);
-        }
-        Ok(Self {
-            arena,
+    /// Start from a validated scenario without replacing its rules or revalidating it.
+    pub fn new(scenario: Scenario) -> Self {
+        Self {
+            arena: scenario.arena,
             character: scenario.character,
             tick: scenario.initial_tick,
-            rules,
-        })
+            rules: scenario.rules,
+        }
     }
 
     /// Advance exactly one tick; the core has no clock or persistent held input.
@@ -319,6 +336,29 @@ mod tests {
 
     const ID: CharacterId = CharacterId::new(42);
 
+    // Raw test inputs for rejected construction cases and the independent reference.
+    #[derive(Clone, Debug)]
+    struct ScenarioInput {
+        width: u32,
+        height: u32,
+        terrain: Vec<Terrain>,
+        character: Character,
+        initial_tick: u64,
+    }
+
+    impl ScenarioInput {
+        fn parse(self, rules: MovementRules) -> Result<Scenario, ConstructionError> {
+            Scenario::new(
+                self.width,
+                self.height,
+                self.terrain,
+                self.character,
+                self.initial_tick,
+                rules,
+            )
+        }
+    }
+
     fn command(direction: Direction) -> MovementCommand {
         MovementCommand {
             character: ID,
@@ -336,12 +376,12 @@ mod tests {
         );
         authored.character.id = game.character().id;
         authored.initial_tick = game.tick() + 1;
-        let expected_game = Game::new(authored, *game.rules()).unwrap();
+        let expected_game = Game::new(authored.parse(*game.rules()).unwrap());
         game.step(frame).unwrap();
         assert_eq!(*game, expected_game, "frame={frame:?}");
     }
 
-    fn rows(rows: &[&str], x: i32, y: i32) -> Scenario {
+    fn rows(rows: &[&str], x: i32, y: i32) -> ScenarioInput {
         assert!(rows.iter().all(|row| row.len() == rows[0].len()));
         scenario(
             u32::try_from(rows[0].len()).unwrap(),
@@ -360,8 +400,8 @@ mod tests {
         )
     }
 
-    fn scenario(width: u32, height: u32, terrain: Vec<Terrain>, x: i32, y: i32) -> Scenario {
-        Scenario {
+    fn scenario(width: u32, height: u32, terrain: Vec<Terrain>, x: i32, y: i32) -> ScenarioInput {
+        ScenarioInput {
             width,
             height,
             terrain,
@@ -376,7 +416,7 @@ mod tests {
     #[test]
     fn construction_observes_the_complete_authored_state() {
         let authored = scenario(2, 1, vec![Terrain::Floor; 2], 256, 128);
-        let game = Game::new(authored.clone(), MovementRules::default()).unwrap();
+        let game = Game::new(authored.clone().parse(MovementRules::default()).unwrap());
         assert_eq!(game.tick(), 0);
         assert_eq!(game.arena().width(), 2);
         assert_eq!(game.arena().height(), 1);
@@ -384,6 +424,40 @@ mod tests {
         assert_eq!(game.character(), &authored.character);
         assert_eq!(game.rules(), &MovementRules::new(192, 16).unwrap());
         assert_eq!(game.clone(), game);
+    }
+
+    #[test]
+    fn scenario_keeps_the_rules_that_make_its_starting_footprint_legal() {
+        let character = Character {
+            id: ID,
+            position: Position { x: 64, y: 128 },
+        };
+        assert_eq!(
+            Scenario::new(
+                1,
+                1,
+                vec![Terrain::Floor],
+                character,
+                0,
+                MovementRules::new(254, 1024).unwrap()
+            ),
+            Err(ConstructionError::InvalidStartingPosition)
+        );
+        let scenario = Scenario::new(
+            1,
+            1,
+            vec![Terrain::Floor],
+            character,
+            0,
+            MovementRules::new(128, 1024).unwrap(),
+        )
+        .unwrap();
+        let mut game = Game::new(scenario);
+        assert_step(
+            &mut game,
+            &[command(Direction::Right)],
+            Position { x: 192, y: 128 },
+        );
     }
 
     #[test]
@@ -405,7 +479,7 @@ mod tests {
     }
 
     #[test]
-    fn game_construction_rejects_invalid_scenarios_and_accepts_limits() {
+    fn scenario_construction_rejects_invalid_data_and_accepts_limits() {
         use ConstructionError::*;
         let base = scenario(1, 1, vec![Terrain::Floor], 128, 128);
         let defaults = MovementRules::default();
@@ -415,13 +489,13 @@ mod tests {
             bad.height = height;
             bad.terrain.clear();
             bad.character.position.x = i32::MIN;
-            assert_eq!(Game::new(bad, defaults), Err(InvalidDimensions));
+            assert_eq!(bad.parse(defaults), Err(InvalidDimensions));
         }
         for terrain in [vec![], vec![Terrain::Floor; 2]] {
             let mut bad = base.clone();
             bad.terrain = terrain;
             bad.character.position.x = i32::MIN;
-            assert_eq!(Game::new(bad, defaults), Err(TerrainLengthMismatch));
+            assert_eq!(bad.parse(defaults), Err(TerrainLengthMismatch));
         }
         for position in [
             Position { x: -1, y: 128 },
@@ -450,30 +524,29 @@ mod tests {
             let mut bad = base.clone();
             bad.character.position = position;
             assert_eq!(
-                Game::new(bad, defaults),
+                bad.parse(defaults),
                 Err(InvalidStartingPosition),
                 "{position:?}"
             );
         }
         for terrain in [Terrain::Wall, Terrain::Block] {
             assert_eq!(
-                Game::new(
-                    scenario(2, 1, vec![Terrain::Floor, terrain], 161, 128),
-                    defaults
-                ),
+                scenario(2, 1, vec![Terrain::Floor, terrain], 161, 128).parse(defaults),
                 Err(InvalidStartingPosition)
             );
             assert!(
-                Game::new(
-                    scenario(2, 1, vec![Terrain::Floor, terrain], 160, 128),
-                    defaults
-                )
-                .is_ok()
+                scenario(2, 1, vec![Terrain::Floor, terrain], 160, 128)
+                    .parse(defaults)
+                    .is_ok()
             );
         }
         for x in [96, 160] {
             for y in [96, 160] {
-                assert!(Game::new(scenario(1, 1, vec![Terrain::Floor], x, y), defaults).is_ok());
+                assert!(
+                    scenario(1, 1, vec![Terrain::Floor], x, y)
+                        .parse(defaults)
+                        .is_ok()
+                );
             }
         }
         for side in [2, 254] {
@@ -487,8 +560,11 @@ mod tests {
                 );
                 authored.character.id = CharacterId::new(u32::MAX);
                 authored.initial_tick = u64::MAX;
-                let game =
-                    Game::new(authored, MovementRules::new(side, distance).unwrap()).unwrap();
+                let game = Game::new(
+                    authored
+                        .parse(MovementRules::new(side, distance).unwrap())
+                        .unwrap(),
+                );
                 assert_eq!(game.tick(), u64::MAX);
                 assert_eq!(game.character().id.value(), u32::MAX);
             }
@@ -498,10 +574,10 @@ mod tests {
     #[test]
     fn cardinal_commands_apply_only_to_their_tick() {
         let base = Game::new(
-            scenario(3, 3, vec![Terrain::Floor; 9], 384, 384),
-            MovementRules::default(),
-        )
-        .unwrap();
+            scenario(3, 3, vec![Terrain::Floor; 9], 384, 384)
+                .parse(MovementRules::default())
+                .unwrap(),
+        );
         for (direction, expected) in [
             (Direction::Up, Position { x: 384, y: 368 }),
             (Direction::Right, Position { x: 400, y: 384 }),
@@ -598,13 +674,16 @@ mod tests {
             ),
         ];
         for (authored, rules, direction, expected) in cases {
-            let mut game = Game::new(authored.clone(), rules).unwrap();
+            let mut game = Game::new(authored.clone().parse(rules).unwrap());
             assert_step(&mut game, &[command(direction)], expected);
             assert_step(&mut game, &[command(direction)], expected);
             assert_step(&mut game, &[], expected);
         }
-        let mut approaching =
-            Game::new(rows(&[".#.."], 128, 128), MovementRules::default()).unwrap();
+        let mut approaching = Game::new(
+            rows(&[".#.."], 128, 128)
+                .parse(MovementRules::default())
+                .unwrap(),
+        );
         for x in [144, 160, 160] {
             assert_step(&mut approaching, &[command(Right)], Position { x, y: 128 });
         }
@@ -619,10 +698,10 @@ mod tests {
             (Direction::Left, Position { x: 96, y: 128 }),
         ] {
             let mut game = Game::new(
-                rows(&["."], 128, 128),
-                MovementRules::new(192, 1024).unwrap(),
-            )
-            .unwrap();
+                rows(&["."], 128, 128)
+                    .parse(MovementRules::new(192, 1024).unwrap())
+                    .unwrap(),
+            );
             assert_step(&mut game, &[command(direction)], expected);
             assert_step(&mut game, &[command(direction)], expected);
         }
@@ -635,10 +714,10 @@ mod tests {
                     vec![Terrain::Floor; 65536],
                     65536 - radius - 1,
                     radius + 1,
-                ),
-                MovementRules::new(side, 1024).unwrap(),
-            )
-            .unwrap();
+                )
+                .parse(MovementRules::new(side, 1024).unwrap())
+                .unwrap(),
+            );
             assert_step(
                 &mut game,
                 &[command(Direction::Right)],
@@ -680,16 +759,24 @@ mod tests {
             "#######", "#.....#", "#.#.#.#", "#.....#", "#.#.#.#", "#.....#", "#######",
         ];
         for x in [352, 416] {
-            let mut game = Game::new(rows(&classic, x, 640), MovementRules::default()).unwrap();
+            let mut game = Game::new(
+                rows(&classic, x, 640)
+                    .parse(MovementRules::default())
+                    .unwrap(),
+            );
             assert_step(&mut game, &[command(Direction::Up)], Position { x, y: 624 });
         }
         for x in [351, 417] {
             assert_eq!(
-                Game::new(rows(&classic, x, 640), MovementRules::default()),
+                rows(&classic, x, 640).parse(MovementRules::default()),
                 Err(ConstructionError::InvalidStartingPosition)
             );
         }
-        let mut turn = Game::new(rows(&classic, 400, 417), MovementRules::default()).unwrap();
+        let mut turn = Game::new(
+            rows(&classic, 400, 417)
+                .parse(MovementRules::default())
+                .unwrap(),
+        );
         assert_step(
             &mut turn,
             &[command(Direction::Right)],
@@ -711,29 +798,41 @@ mod tests {
             Position { x: 432, y: 401 },
         );
 
-        let mut corner =
-            Game::new(rows(&["..", ".#"], 160, 160), MovementRules::default()).unwrap();
+        let mut corner = Game::new(
+            rows(&["..", ".#"], 160, 160)
+                .parse(MovementRules::default())
+                .unwrap(),
+        );
         assert_step(
             &mut corner,
             &[command(Direction::Right)],
             Position { x: 176, y: 160 },
         );
-        let mut blocked_corner =
-            Game::new(rows(&["..", ".#"], 160, 161), MovementRules::default()).unwrap();
+        let mut blocked_corner = Game::new(
+            rows(&["..", ".#"], 160, 161)
+                .parse(MovementRules::default())
+                .unwrap(),
+        );
         assert_step(
             &mut blocked_corner,
             &[command(Direction::Right)],
             Position { x: 160, y: 161 },
         );
-        let mut spanning =
-            Game::new(rows(&["..", ".."], 256, 256), MovementRules::default()).unwrap();
+        let mut spanning = Game::new(
+            rows(&["..", ".."], 256, 256)
+                .parse(MovementRules::default())
+                .unwrap(),
+        );
         assert_step(
             &mut spanning,
             &[command(Direction::Down)],
             Position { x: 256, y: 272 },
         );
-        let mut perpendicular =
-            Game::new(rows(&[".#.", "..."], 384, 352), MovementRules::default()).unwrap();
+        let mut perpendicular = Game::new(
+            rows(&[".#.", "..."], 384, 352)
+                .parse(MovementRules::default())
+                .unwrap(),
+        );
         assert_step(
             &mut perpendicular,
             &[command(Direction::Right)],
@@ -782,7 +881,7 @@ mod tests {
         for tick in [0, u64::MAX] {
             let mut authored = rows(&[".."], 128, 128);
             authored.initial_tick = tick;
-            let mut game = Game::new(authored, MovementRules::default()).unwrap();
+            let mut game = Game::new(authored.parse(MovementRules::default()).unwrap());
             for (frame, error) in &faults {
                 for shift in 0..frame.len() {
                     let mut reordered = frame.clone();
@@ -816,14 +915,14 @@ mod tests {
         ] {
             let mut authored = rows(&[".#"], start, 128);
             authored.initial_tick = u64::MAX - 1;
-            let mut game = Game::new(authored, MovementRules::default()).unwrap();
+            let mut game = Game::new(authored.parse(MovementRules::default()).unwrap());
             assert_step(&mut game, &frame, expected);
             assert_eq!(game.tick(), u64::MAX);
             assert_rejected(&mut game, &frame, StepError::TickExhausted);
         }
         let mut authored = rows(&[".."], 128, 128);
         authored.character.id = CharacterId::new(0);
-        let mut game = Game::new(authored, MovementRules::default()).unwrap();
+        let mut game = Game::new(authored.parse(MovementRules::default()).unwrap());
         assert_step(
             &mut game,
             &[MovementCommand {
@@ -836,7 +935,7 @@ mod tests {
 
     // Independent reference: enumerate ALL terrain rectangles and measure positive-area
     // overlap directly. No production geometry, cell query, or advancement helper is used.
-    fn reference_legal(authored: &Scenario, rules: MovementRules, position: Position) -> bool {
+    fn reference_legal(authored: &ScenarioInput, rules: MovementRules, position: Position) -> bool {
         let radius = i64::from(rules.footprint_side() / 2);
         let (left, right) = (
             i64::from(position.x) - radius,
@@ -869,7 +968,11 @@ mod tests {
         true
     }
 
-    fn reference_move(authored: &Scenario, rules: MovementRules, direction: Direction) -> Position {
+    fn reference_move(
+        authored: &ScenarioInput,
+        rules: MovementRules,
+        direction: Direction,
+    ) -> Position {
         let (dx, dy) = match direction {
             Direction::Up => (0, -1),
             Direction::Right => (1, 0),
@@ -921,7 +1024,7 @@ mod tests {
                         let authored = scenario(2, 2, terrain.clone(), x, y);
                         for distance in [1, 16, 255, 256, 257, 1024] {
                             let rules = MovementRules::new(side, distance).unwrap();
-                            let constructed = Game::new(authored.clone(), rules);
+                            let constructed = authored.clone().parse(rules);
                             if !reference_legal(&authored, rules, authored.character.position) {
                                 assert_eq!(
                                     constructed,
@@ -930,9 +1033,9 @@ mod tests {
                                 );
                                 continue;
                             }
-                            let base = constructed.unwrap_or_else(|error| {
+                            let base = Game::new(constructed.unwrap_or_else(|error| {
                                 panic!("scenario={authored:?}, rules={rules:?}, step=0: {error:?}")
-                            });
+                            }));
                             for direction in [
                                 Direction::Up,
                                 Direction::Right,
@@ -943,7 +1046,7 @@ mod tests {
                                 expected.character.position =
                                     reference_move(&authored, rules, direction);
                                 expected.initial_tick += 1;
-                                let expected_game = Game::new(expected, rules).unwrap();
+                                let expected_game = Game::new(expected.parse(rules).unwrap());
                                 let mut game = base.clone();
                                 let result = game.step(&[command(direction)]);
                                 assert_eq!(
@@ -1027,8 +1130,8 @@ mod tests {
             MovementRules::new(192, 512).unwrap(),
             MovementRules::new(254, 1024).unwrap(),
         ] {
-            let mut game = Game::new(authored.clone(), rules).unwrap();
-            let mut replay = Game::new(authored.clone(), rules).unwrap();
+            let mut game = Game::new(authored.clone().parse(rules).unwrap());
+            let mut replay = Game::new(authored.clone().parse(rules).unwrap());
             let mut reference = authored.clone();
             let mut continuation = None;
             for (step, (frame, outcome)) in frames.iter().enumerate() {
@@ -1065,7 +1168,7 @@ mod tests {
                 );
                 assert_eq!(
                     game,
-                    Game::new(reference.clone(), rules).unwrap(),
+                    Game::new(reference.clone().parse(rules).unwrap()),
                     "reference sequence, scenario={authored:?}, rules={rules:?}, frame={frame:?}, step={step}"
                 );
                 assert_eq!(
