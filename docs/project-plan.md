@@ -24,7 +24,7 @@ Exploderous keeps Normal, Battle, and Versus as separate gameplay presets. Battl
 | --- | --- | --- |
 | Rust skeleton | Minimal Cargo project and runnable placeholder executable | Build/run succeeds; CI runs formatting, Clippy, and tests |
 | Movement and collision | Headless arena and integer sub-cell movement with an explicit character footprint | Rule tests cover body bounds, clear-path progress, and whole-path stopping at obstacles; compare bounded scenarios against an independent movement reference |
-| Movement TUI playtest | Keyboard input, visible sub-cell movement, and real-time pacing around the movement core | In a compatible terminal, a human can navigate, stop, turn, reset, and quit; normal exit and handled failures restore the terminal |
+| Movement TUI playtest | Keyboard input, a fixed-cell movement map, status/help screens, and real-time pacing around the movement core | In a compatible terminal, a human can navigate, stop, turn, reset, inspect help, and quit; normal exit and handled failures restore the terminal |
 | One-bomb mechanics | Placement, fuse, blasts, block destruction; extend the existing TUI to exercise them | Rule tests cover placement restrictions, timing, propagation, and lingering hazards |
 | Complete first level | Exit objective, death, victory, explicit restart, integrated into the TUI | Scripted and terminal play can complete and restart the arena; tests cover death-before-victory and restoration on restart |
 
@@ -44,15 +44,37 @@ The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) resolv
 
 After the movement slice, build a minimal TUI around the same validated construction, tick-input, and read-only observation interface. This is a movement playground, not yet a complete Normal level:
 
-- One fixed classic arena with corridors, walls, and a few blocks; one character.
-- Real-time pacing at the movement spec's nominal tick rate, independent of rendering. The frontend supplies tick frames; the core remains the sole owner of movement and collision.
-- A display that makes sub-cell movement visible, plus a small readout of position, movement distance, and footprint side length. Display rounding must not change simulation coordinates.
-- Direction controls, reset by constructing a fresh game, clean exit, and safe terminal-resize handling. Clear held-input state on reset.
-- No bombs, objectives, arena editor, random generation, menus, or generic frontend framework. Add later mechanics to this TUI as their core slices arrive.
+- The root is a virtual Cargo workspace; `crates/tui` owns the runnable app, depends on `exploderous-core`, and uses Ratatui with Crossterm.
+- Use one fixed 9×9 classic arena with a Wall border and pillars at interior Cells whose zero-based row and column are both even. The player starts at the centre of zero-based Cell `(1,1)` (world position `(384,384)`). Blocks occupy `(3,1)`, `(5,1)`, `(5,3)`, `(1,5)`, `(3,5)`, `(7,5)`, `(3,7)`, and `(5,7)` (coordinates are column, row).
+- Render one contiguous glyph per Cell, with no inter-cell padding. Draw the Character in the Cell containing its centre; sub-cell movement is intentionally not visible in the map. Do not show the former position/speed/footprint telemetry.
+- Use the fixed glyphs below. In the live movement view, only Floor, Wall, Block, and the player Character are present; help also documents the reserved future glyphs.
 
-Require [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) support, including event-type reporting and reporting all keys as escape codes. This supplies press/repeat/release events even for unmodified letter keys. Require the capabilities, not a particular terminal application; any intermediary such as a terminal multiplexer must preserve them. Negotiate and verify the required enhancements at startup. Unsupported environments get an actionable error and terminal cleanup, not an OS-key-repeat fallback. Movement follows held-key state derived from press/release events; autorepeat does not control simulation speed. Restore the previous keyboard mode and other terminal state on normal exit and handled failures.
+  | Type | Glyph |
+  | --- | --- |
+  | Floor | blank space (U+0020) |
+  | Wall | `█` |
+  | Block | `▒` |
+  | Player Character | `@` |
+  | AI-controlled non-Enemy Character | `a` |
+  | Enemy Character | `e` |
+  | Bomb | `●` |
+  | Blast centre | `┼` |
+  | Blast arms, north/south | `│` |
+  | Blast arms, east/west | `─` |
+  | Exit | `⬚` |
+  | Bomb-capacity Item | `▣` |
+  | Item that increases Blast reach | `◈` |
 
-Before implementation, the TUI slice spec must settle held-key conflicts, display resolution and minimum size, resize/focus behavior, pacing/catch-up policy, and the test seam. Its human-playtest gate complements automated rule checks; scoped Kani and mutation-testing work remains interleaved as described below.
+  `e` identifies an Enemy regardless of controller; `a` identifies an AI-controlled Character that is not an Enemy. Require the selected glyphs to occupy one terminal column in the manual playtest; do not silently substitute glyphs. When Blasts are added, draw an arm in the destroyed Block's Cell and stop there; a Wall remains visible and stops the ray.
+- Keep a one-line status area below the map: `Lives: 0 | Score: 0`. These are display-only placeholders for layout, not fields or behavior in the core Game; omit the former position/speed/footprint telemetry. The status line makes the gameplay minimum 19 columns × 10 rows (the 9×9 map plus one row).
+- In gameplay, use arrow keys only for movement, `R` to reset by constructing a fresh Game, and `Q` or Escape to quit. Escape closes help instead when help is open. When multiple directions are held, the most recently pressed wins; releasing it falls back to the most recently pressed remaining direction. Clear held input and elapsed-time backlog on reset. Treat repeat events as neither new presses nor simulation ticks; a direction stays held until release.
+- `?`, `h`, or `H` toggles a paused help screen; Escape closes it. Clear held directions when entering or leaving help. The help screen lists controls, the live glyphs, and the reserved future glyphs; Up/Down scrolls the list when it exceeds the available space, without increasing the gameplay minimum. While help is open, only scrolling and help-close/toggle keys work; `R` and `Q` are ignored. Process help/reset/quit commands only on key presses, not repeats.
+- Advance the core at the movement spec's nominal 60 Hz, independent of rendering. Use a monotonic clock; process at most five overdue ticks in an update, then discard excess elapsed-time backlog. Drain available key events before stepping; every tick in a catch-up batch uses the resulting held-direction state. Paused time (help, focus loss, or undersized terminal) does not accumulate; reset the clock baseline when resuming idle.
+- Center the unchanged arena when it fits. On focus loss, pause tick advancement and clear held input. If the terminal is smaller than 19×10, also show a resize message. Resume idle only when focus is present, the terminal fits, and help is closed. The help screen wraps and scrolls within that same minimum.
+- Require [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) support, including event-type reporting and reporting all keys as escape codes. Require the capabilities, not a particular terminal application; any intermediary must preserve them. Negotiate and verify the Kitty keyboard enhancements at startup, and enable Crossterm focus-change reporting for the pause-on-focus-loss behavior. Unsupported terminal capabilities get an actionable error and terminal cleanup, not an OS-key-repeat fallback. Restore the previous keyboard mode and other terminal state on normal exit and handled failures.
+- Keep bombs, objectives, arena editing, random generation, and gameplay menus out of this slice. Add later mechanics to the same TUI as their core slices arrive. Test adapter behavior headlessly and require a manual terminal playtest; manually verify keyboard negotiation, all four movement directions, held-key precedence/release, reset, status placeholders, help pause/scroll/resume and ignored `R`/`Q` while help is open, focus and resize recovery without catch-up movement on resume, actual glyph widths, and terminal restoration on normal exit, unsupported-terminal startup, and handled failure.
+
+Before implementation, capture this scope in the TUI slice spec and turn the listed manual checks into an explicit pass checklist. Scoped Kani and mutation-testing work remains interleaved as described below.
 
 ## First level
 
