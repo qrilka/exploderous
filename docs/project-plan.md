@@ -38,7 +38,7 @@ Implement terrain, validated rules/scenario construction, one human-controlled c
 
 Do not scaffold dormant enemy variants, bombs, blast/item collections, an exit field, AI/RNG state, networking, or generic adapters in this slice. Those parts of the full design are implemented with their corresponding gameplay features.
 
-The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) resolves the initial movement parameters and defines concrete validation/error acceptance criteria. Implement its worked movement cases, rejected-input state preservation, replay/cloning checks, and bounded comparison against the independent movement reference through the shared whole-game interface. Advanced-tool setup remains separate explicit verification work.
+The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) resolves the initial movement parameters and defines concrete validation/error acceptance criteria. [Turn assistance](https://github.com/qrilka/exploderous/issues/5) revises the initial no-alignment restriction; the lasting rule is owned by the [movement design](design/game-state.md#turn-assistance). Implement its worked movement cases, rejected-input state preservation, replay/cloning checks, and bounded comparison against the independent movement reference through the shared whole-game interface. Advanced-tool setup remains separate explicit verification work.
 
 ### Following slice: movement TUI playtest
 
@@ -87,7 +87,7 @@ Death or victory stops gameplay until explicit restart restores the initial aren
 ### Simulation and action rules
 
 - Real-time play uses fixed simulation ticks and integer sub-cell movement. The adapter controls pacing; rendering frequency and TUI display precision do not define game time or collision geometry.
-- The initial character has a square footprint smaller than a cell. Cardinal movement checks the whole traveled path and stops at the first obstacle; exact edge contact is allowed. There is no automatic sideways alignment or corner sliding initially.
+- The initial character has a square footprint smaller than a cell. Cardinal movement checks the whole traveled path and stops at the first obstacle; exact edge contact is allowed. The [movement design](design/game-state.md#turn-assistance) defines bounded turn assistance and the strict comparison mode; unrestricted corner sliding remains excluded.
 - Resolve movement, then placement, then explosions, then harm, then victory. Moving clear before an expiring bomb detonates can save the player if the final footprint is clear of its new blast; crossing an already-live blast remains harmful.
 - Bomb placement uses the character's centre cell without snapping its position. A newly placed bomb starts with its full fuse; a live blast can trigger it immediately.
 - Walls, blocks, and bomb cells block movement. Passage permission for a newly placed bomb lasts until the placing character's whole footprint clears that cell. After permission ends, re-entry is blocked while the bomb remains undetonated.

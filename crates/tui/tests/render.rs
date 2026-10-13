@@ -90,6 +90,27 @@ fn center_offset_tracks_movement_and_rebases_at_the_cell_boundary() {
 }
 
 #[test]
+fn center_offset_shows_gradual_assistance_without_claiming_full_centering() {
+    let start = Instant::now();
+    let mut app = App::new(start, 19, 11);
+    app.handle_key(key(KeyCode::Down), start);
+    for tick in 1..=4 {
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    app.handle_key(key(KeyCode::Right), start + TICK_INTERVAL * 4);
+    for (tick, offset) in [
+        (5, "Offset: +016,+064"),
+        (6, "Offset: +032,+064"),
+        (7, "Offset: +032,+048"),
+        (8, "Offset: +032,+032"),
+        (9, "Offset: +048,+032"),
+    ] {
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+        assert_eq!(screen(&draw(&app, 19, 11))[10].trim(), offset);
+    }
+}
+
+#[test]
 fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels() {
     let now = Instant::now();
     let mut app = App::new(now, 80, 30);

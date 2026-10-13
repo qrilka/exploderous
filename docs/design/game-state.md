@@ -2,7 +2,7 @@
 
 Agreed representation and behavioral contract for the headless core. See the [project plan](../project-plan.md), [glossary](../../GLOSSARY.md), and [representation ADR](../adr/0002-grid-terrain-and-positioned-objects.md).
 
-Characters use integer sub-cell positions and movement. Rust sketches below explain data relationships rather than complete declarations. Names such as `Cell`, `Tick`, and identity types denote distinct concepts. The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) defines the initial movement scale, defaults, limits, and validation/error contract; remaining choices are listed under [Open design decisions](#open-design-decisions).
+Characters use integer sub-cell positions and movement. Rust sketches below explain data relationships rather than complete declarations. Names such as `Cell`, `Tick`, and identity types denote distinct concepts. The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) defines the movement scale, defaults, limits, and validation/error contract. [Turn assistance](https://github.com/qrilka/exploderous/issues/5) deliberately revises its initial no-alignment rule as specified below; remaining choices are listed under [Open design decisions](#open-design-decisions).
 
 ## Terrain grid
 
@@ -85,7 +85,22 @@ Movement:
 - Receives at most one cardinal direction per character per tick, with displacement determined by the game's rules. A command applies only to its tick; omission means no movement, not continuation of a remembered direction. Frontends represent held input with repeated tick commands. Initial movement parameters are fixed at construction; later dynamic effects require explicit gameplay rules.
 - Checks the entire path of the footprint, not merely its centre or destination. Stop at the furthest legal position at the first obstacle; exact edge contact is allowed, penetration is not.
 - Keeps the complete footprint inside arena bounds and outside terrain forbidden by that character's rules.
-- Does not automatically align to corridor centres or move sideways along obstacles. Any turn assistance would be an additional movement rule, not an implicit collision adjustment.
+- Uses the explicit turn-assistance rule below when enabled, not unrestricted corner sliding or frontend alignment.
+
+### Turn assistance
+
+`MovementRules` selects assisted or strict movement before Scenario construction and remains fixed for the Game's lifetime. Assistance is enabled by default; strict mode uses only ordinary cardinal movement. The canonical Footprint remains 192 world units and movement distance remains 16. At the 256-unit Cell scale, that Footprint allows centre offsets of ±32 in a one-Cell corridor.
+
+For each commanded tick:
+
+1. Calculate ordinary cardinal movement with full-path collision checks. If it completes the requested distance, use that result unchanged.
+2. If ordinary movement is shortened, consider assistance only when the perpendicular offset from the current Cell's centreline is within ±80 world units, inclusive. This fixed window applies to all valid Footprint sizes and movement distances.
+3. Search toward that centreline, not away from it or toward another Cell. Choose the smallest positive integer correction for which the entire perpendicular path is legal and a full requested forward step from the corrected position is legal. Both segments respect the complete Footprint, terrain, and arena bounds; a legal destination does not justify crossing an intervening obstruction.
+4. If such a correction exists, begin at the original position for the tick. Spend the shared movement-distance budget on correction first, then any remainder on forward movement. Otherwise use the ordinary result, including any partial progress. Do not drift sideways if the proposed forward path remains blocked.
+
+A correction larger than the budget takes multiple commanded ticks. Eligibility and the nearest legal correction are recomputed each tick; there is no remembered direction or pending alignment. Empty input stops immediately, and a changed command uses its own geometry. Once ordinary movement becomes legal, assistance stops: it permits entry, not guaranteed centering. For example, at the canonical defaults, a corridor entry requiring 32 units of sideways correction consumes two 16-unit ticks; forward travel resumes on the next tick, potentially still 32 units off-centre. Clear cardinal travel is never recentered.
+
+The core owns both path segments and every position change. Frontends only select rules at startup, send ordinary per-tick commands, and display observations. Any later movement-path consumers (such as blast contact) must account for both actually traveled segments in their order rather than infer a straight line between tick endpoints.
 
 Character records own positions. There is no second authoritative character-occupancy grid. Initially, occupancy queries scan the records. This has an O(n) cost per query; add a derived spatial index only if profiling shows these scans matter.
 
@@ -212,9 +227,9 @@ All methods exercise production construction and movement routines; there is no 
 | Method | Intended evidence |
 | --- | --- |
 | Coordinate conversions | Cell-boundary positions, negative/out-of-Arena positions, cell centres, and row-major access on non-square arenas |
-| Worked examples | Each direction, exact contact, off-centre corridor entry, partial stopping, crossed obstacles, borders, blocked and free paths |
+| Worked examples | Each direction, exact contact, off-centre corridor entry, inclusive assistance-window boundaries, shared correction/forward budget, partial stopping, crossed obstacles, borders, blocked and free paths in assisted and strict modes |
 | Validation/error tests | Bad dimensions/lengths/positions/parameters, limits and arithmetic edges, duplicate identities/commands, and unchanged complete state on rejected frames |
-| Independent movement reference | On bounded scenarios, advance the footprint one world unit at a time and compare the furthest legal position to the production sweep |
+| Independent movement reference | On bounded scenarios in both modes, advance each candidate correction/forward path one world unit at a time using independent overlap geometry and compare the resulting position to production movement |
 | Deterministic sequence tests | Check invariants throughout action sequences; capture initial state, parameters, inputs, and generator seed for reproduction |
 | Clone/continuation tests | Clone at intermediate ticks, apply identical suffixes and compare complete state; independently branch without sharing mutable state |
 | Kani | Scoped bounded proofs of collision/bounds safety, exact clear-path progress, and maximal legal stopping using actual routines |

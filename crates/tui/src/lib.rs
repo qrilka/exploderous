@@ -72,8 +72,12 @@ pub struct App {
 
 impl App {
     pub fn new(now: Instant, width: u16, height: u16) -> Self {
+        Self::new_with_rules(now, width, height, MovementRules::default())
+    }
+
+    pub fn new_with_rules(now: Instant, width: u16, height: u16, rules: MovementRules) -> Self {
         let mut app = Self {
-            game: new_game(),
+            game: new_game(rules),
             held: Vec::new(),
             focused: true,
             width,
@@ -228,7 +232,7 @@ impl App {
     }
 
     fn reset(&mut self, now: Instant) {
-        self.game = new_game();
+        self.game = new_game(*self.game.rules());
         self.held.clear();
         self.next_tick = None;
         self.reconcile_clock(now);
@@ -273,7 +277,7 @@ fn direction(code: KeyCode) -> Option<Direction> {
     }
 }
 
-fn new_game() -> Game {
+fn new_game(rules: MovementRules) -> Game {
     let blocks = [
         CellCoord::new(Column::new(3), Row::new(1)),
         CellCoord::new(Column::new(5), Row::new(1)),
@@ -312,7 +316,7 @@ fn new_game() -> Game {
             id: CharacterId::new(0),
             position: Position::new(WorldX::new(384), WorldY::new(384)),
         },
-        MovementRules::default(),
+        rules,
     )
     .expect("the fixed movement arena is valid");
     Game::new(scenario, 0)

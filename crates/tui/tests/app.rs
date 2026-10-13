@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use exploderous_core::game::{Direction, Position, WorldX, WorldY};
+use exploderous_core::game::{Direction, MovementRules, Position, WorldX, WorldY};
 use exploderous_tui::{App, TICK_INTERVAL, TickRecord};
 
 fn point(x: i32, y: i32) -> Position {
@@ -197,6 +197,45 @@ fn focus_pause_clears_input_and_resumes_idle() {
         1
     );
     assert_eq!(app.game().character().position, point(384, 384));
+}
+
+#[test]
+fn assisted_and_strict_rules_drive_turns_and_survive_reset() {
+    let start = Instant::now();
+    for (assisted, expected) in [(true, point(432, 416)), (false, point(416, 448))] {
+        let rules = MovementRules::default().with_turn_assistance(assisted);
+        let mut app = App::new_with_rules(start, 19, 11, rules);
+        app.handle_key(press(KeyCode::Down), start);
+        for tick in 1..=4 {
+            app.advance(start + TICK_INTERVAL * tick).unwrap();
+        }
+        let turn_at = start + TICK_INTERVAL * 4;
+        app.handle_key(release(KeyCode::Down), turn_at);
+        app.handle_key(press(KeyCode::Right), turn_at);
+        for tick in 5..=9 {
+            app.advance(start + TICK_INTERVAL * tick).unwrap();
+        }
+        assert_eq!(app.game().character().position, expected);
+        app.handle_key(release(KeyCode::Right), start + TICK_INTERVAL * 9);
+        app.advance(start + TICK_INTERVAL * 10).unwrap();
+        assert_eq!(app.game().character().position, expected);
+        app.handle_key(press(KeyCode::Char('r')), start + TICK_INTERVAL * 10);
+        assert_eq!(app.game().character().position, point(384, 384));
+        assert_eq!(app.game().rules(), &rules);
+    }
+}
+
+#[test]
+fn unknown_startup_options_are_rejected_before_terminal_initialization() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_exploderous-tui"))
+        .arg("--unknown")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("usage: exploderous-tui [--strict-movement]")
+    );
 }
 
 #[test]
