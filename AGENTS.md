@@ -20,6 +20,10 @@ Use the default canonical triage labels. See `docs/agents/triage-labels.md`.
 
 Use the single-context layout. See `docs/agents/domain.md`.
 
+### Implementation references
+
+Before implementing behavior governed by a project design/ADR or by a protocol, platform, framework, or dependency, read and follow `docs/agents/implementation-references.md`.
+
 ## Design interviews
 
 When a noticeable change leaves materially different design choices open, or a technical decision or system design needs discussion, read `docs/agents/design-interviews.md`.

@@ -27,7 +27,7 @@ struct Arena {
 - **Wall:** indestructible terrain that blocks movement and blasts. This represents the reference's non-blowable boulders.
 - **Block:** destructible terrain that blocks movement; a blast destroys it and stops that ray.
 
-The vector stores rows consecutively. Cell `(column, row)` has index `row * width + column`, using checked dimensions, arithmetic, conversions, and coordinates. Its length must equal the validated cell count.
+The vector stores rows consecutively. `Arena` owns the checked conversion between a `CellCoord` and its row-major index (`row * width + column`), plus terrain lookup and iteration. Callers do not reproduce this arithmetic. The vector length must equal the validated cell count.
 
 Characters, bombs, blasts, items, and the exit do not replace terrain values. For example, a block and a concealed exit can share a cell. Destroying the block changes terrain to floor without erasing the exit.
 
@@ -55,9 +55,18 @@ Odd interior dimensions let the alternating pattern begin and end with corridors
 
 ```rust
 // Centre coordinates; the movement spec defines the scale and limits.
+struct WorldX(i32);
+struct WorldY(i32);
 struct Position {
-    x: i32,
-    y: i32,
+    x: WorldX,
+    y: WorldY,
+}
+
+struct Column(u32);
+struct Row(u32);
+struct CellCoord {
+    column: Column,
+    row: Row,
 }
 
 struct Character {
@@ -67,7 +76,7 @@ struct Character {
 }
 ```
 
-Position is the character's centre in integer world units, not a terrain cell coordinate or a screen pixel. The origin is the arena's outer top-left corner; X increases rightward and Y downward. One fixed scale relates world units to cell side length. Cell assignment uses consecutive lower-inclusive, upper-exclusive intervals; a footprint can span several cells regardless of its centre's cell.
+`Position` is the character's centre in integer world units, not a terrain cell coordinate or a screen pixel. Its axis-specific newtypes prevent swapping world X and Y. `CellCoord` likewise keeps Column distinct from Row; it is a grid address, not the physical Cell area. The origin is the arena's outer top-left corner; X increases rightward and Y downward. One fixed scale relates world units to cell side length. `Arena` is the canonical conversion point: it maps a Position to its containing in-bounds `CellCoord`, maps an in-bounds `CellCoord` to its world-space centre, and owns row-major terrain indexing. Cell assignment uses consecutive lower-inclusive, upper-exclusive intervals; negative or out-of-Arena positions have no containing cell. A footprint can span several cells regardless of its centre's cell.
 
 The initial bomber's footprint is a square whose sides remain horizontal and vertical. Its side length is smaller than a cell so one-cell-wide corridors allow some positioning error. The allowed deviation from a corridor's centreline is half the difference between the cell and footprint side lengths. Rectangles overlap only when their intersections have positive length on both axes; edge or corner contact alone is safe.
 
@@ -202,6 +211,7 @@ All methods exercise production construction and movement routines; there is no 
 
 | Method | Intended evidence |
 | --- | --- |
+| Coordinate conversions | Cell-boundary positions, negative/out-of-Arena positions, cell centres, and row-major access on non-square arenas |
 | Worked examples | Each direction, exact contact, off-centre corridor entry, partial stopping, crossed obstacles, borders, blocked and free paths |
 | Validation/error tests | Bad dimensions/lengths/positions/parameters, limits and arithmetic edges, duplicate identities/commands, and unchanged complete state on rejected frames |
 | Independent movement reference | On bounded scenarios, advance the footprint one world unit at a time and compare the furthest legal position to the production sweep |

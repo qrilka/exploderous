@@ -1,4 +1,4 @@
-//! The movement slice: validated construction, tick input, read-only state, and cloning.
+//! Deterministic grid movement, scenario validation, and game-state types.
 
 use std::collections::BTreeSet;
 
@@ -26,11 +26,102 @@ impl CharacterId {
     }
 }
 
-/// Integer centre coordinates, with the origin at the arena's outer top-left corner.
+/// Signed world coordinate on the horizontal axis, in simulation units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorldX(i32);
+
+impl WorldX {
+    pub const fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> i32 {
+        self.0
+    }
+}
+
+/// Signed world coordinate on the vertical axis, in simulation units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorldY(i32);
+
+impl WorldY {
+    pub const fn new(value: i32) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> i32 {
+        self.0
+    }
+}
+
+/// Zero-based horizontal grid coordinate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Column(u32);
+
+impl Column {
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> u32 {
+        self.0
+    }
+}
+
+/// Zero-based vertical grid coordinate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Row(u32);
+
+impl Row {
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> u32 {
+        self.0
+    }
+}
+
+/// Integer world-space point in simulation units, with the origin at the arena's outer top-left.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Position {
-    pub x: i32,
-    pub y: i32,
+    x: WorldX,
+    y: WorldY,
+}
+
+impl Position {
+    pub const fn new(x: WorldX, y: WorldY) -> Self {
+        Self { x, y }
+    }
+
+    pub const fn x(self) -> WorldX {
+        self.x
+    }
+
+    pub const fn y(self) -> WorldY {
+        self.y
+    }
+}
+
+/// A zero-based Cell address. Arena operations check whether it is in bounds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CellCoord {
+    column: Column,
+    row: Row,
+}
+
+impl CellCoord {
+    pub const fn new(column: Column, row: Row) -> Self {
+        Self { column, row }
+    }
+
+    pub const fn column(self) -> Column {
+        self.column
+    }
+
+    pub const fn row(self) -> Row {
+        self.row
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,20 +275,81 @@ impl Arena {
         &self.terrain
     }
 
+    /// Return the in-bounds Cell containing this world-space position.
+    pub fn cell_containing(&self, position: Position) -> Option<CellCoord> {
+        let column = u32::try_from(position.x().value().div_euclid(WORLD_UNITS_PER_CELL)).ok()?;
+        let row = u32::try_from(position.y().value().div_euclid(WORLD_UNITS_PER_CELL)).ok()?;
+        let cell = CellCoord::new(Column::new(column), Row::new(row));
+        self.cell_index(cell).map(|_| cell)
+    }
+
+    /// Return the world-space centre of an in-bounds Cell.
+    pub fn cell_center(&self, cell: CellCoord) -> Option<Position> {
+        let origin = self.cell_origin(cell)?;
+        let half_cell = WORLD_UNITS_PER_CELL / 2;
+        Some(Position::new(
+            WorldX::new(origin.x().value().checked_add(half_cell)?),
+            WorldY::new(origin.y().value().checked_add(half_cell)?),
+        ))
+    }
+
+    /// Return terrain at an in-bounds Cell.
+    pub fn terrain_at(&self, cell: CellCoord) -> Option<Terrain> {
+        self.cell_index(cell).map(|index| self.terrain[index])
+    }
+
+    /// Iterate Cells and their terrain in the Arena's canonical row-major order.
+    pub fn cells(&self) -> impl Iterator<Item = (CellCoord, Terrain)> + '_ {
+        let width = usize::try_from(self.width).expect("validated arena width fits usize");
+        self.terrain
+            .iter()
+            .copied()
+            .enumerate()
+            .map(move |(index, terrain)| {
+                let column = u32::try_from(index % width).expect("column fits validated arena");
+                let row = u32::try_from(index / width).expect("row fits validated arena");
+                (CellCoord::new(Column::new(column), Row::new(row)), terrain)
+            })
+    }
+
+    fn cell_origin(&self, cell: CellCoord) -> Option<Position> {
+        self.cell_index(cell)?;
+        let units_per_cell = i64::from(WORLD_UNITS_PER_CELL);
+        let x = i64::from(cell.column().value()) * units_per_cell;
+        let y = i64::from(cell.row().value()) * units_per_cell;
+        Some(Position::new(
+            WorldX::new(i32::try_from(x).ok()?),
+            WorldY::new(i32::try_from(y).ok()?),
+        ))
+    }
+
+    fn cell_index(&self, cell: CellCoord) -> Option<usize> {
+        let column = cell.column().value();
+        let row = cell.row().value();
+        if column >= self.width || row >= self.height {
+            return None;
+        }
+        row.checked_mul(self.width)?
+            .checked_add(column)
+            .and_then(|index| usize::try_from(index).ok())
+    }
+
     // Callers supply a positive-area rectangle wholly within the validated arena.
-    fn obstructions(&self, rect: Rect) -> impl Iterator<Item = (i64, i64)> + '_ {
+    fn obstructions(&self, rect: Rect) -> impl Iterator<Item = CellCoord> + '_ {
         let cell = i64::from(WORLD_UNITS_PER_CELL);
         let columns = rect.left / cell..=(rect.right - 1) / cell;
         let rows = rect.top / cell..=(rect.bottom - 1) / cell;
         rows.flat_map(move |row| {
             columns.clone().filter_map(move |column| {
-                let index = u32::try_from(row)
-                    .ok()
-                    .and_then(|r| r.checked_mul(self.width))
-                    .and_then(|offset| u32::try_from(column).ok()?.checked_add(offset))
-                    .and_then(|index| usize::try_from(index).ok())
-                    .expect("cell index fits validated arena dimensions");
-                (self.terrain[index] != Terrain::Floor).then_some((column * cell, row * cell))
+                let cell = CellCoord::new(
+                    Column::new(u32::try_from(column).expect("obstruction column is in arena")),
+                    Row::new(u32::try_from(row).expect("obstruction row is in arena")),
+                );
+                (self
+                    .terrain_at(cell)
+                    .expect("obstruction cell is in validated arena")
+                    != Terrain::Floor)
+                    .then_some(cell)
             })
         })
     }
@@ -215,10 +367,10 @@ impl Rect {
     fn footprint(position: Position, rules: MovementRules) -> Self {
         let half_side = i64::from(rules.footprint_side / 2);
         Self {
-            left: i64::from(position.x) - half_side,
-            top: i64::from(position.y) - half_side,
-            right: i64::from(position.x) + half_side,
-            bottom: i64::from(position.y) + half_side,
+            left: i64::from(position.x().value()) - half_side,
+            top: i64::from(position.y().value()) - half_side,
+            right: i64::from(position.x().value()) + half_side,
+            bottom: i64::from(position.y().value()) + half_side,
         }
     }
 }
@@ -271,8 +423,8 @@ impl Game {
         let half = i64::from(self.rules.footprint_side / 2);
         let distance = i64::from(self.rules.movement_distance);
         let cell = i64::from(WORLD_UNITS_PER_CELL);
-        let mut x = i64::from(self.character.position.x);
-        let mut y = i64::from(self.character.position.y);
+        let mut x = i64::from(self.character.position.x().value());
+        let mut y = i64::from(self.character.position.y().value());
         let mut swept = Rect::footprint(self.character.position, self.rules);
         // Clip to the arena, then inspect every cell with positive-area swept overlap.
         // Cardinal motion leaves the perpendicular interval unchanged, so each such
@@ -295,18 +447,24 @@ impl Game {
                 swept.left = x - half;
             }
         }
-        for (column_edge, row_edge) in self.arena.obstructions(swept) {
+        for obstruction in self.arena.obstructions(swept) {
+            let origin = self
+                .arena
+                .cell_origin(obstruction)
+                .expect("obstruction cell is in validated arena");
+            let left_edge = i64::from(origin.x().value());
+            let top_edge = i64::from(origin.y().value());
             match direction {
-                Direction::Up => y = y.max(row_edge + cell + half),
-                Direction::Right => x = x.min(column_edge - half),
-                Direction::Down => y = y.min(row_edge - half),
-                Direction::Left => x = x.max(column_edge + cell + half),
+                Direction::Up => y = y.max(top_edge + cell + half),
+                Direction::Right => x = x.min(left_edge - half),
+                Direction::Down => y = y.min(top_edge - half),
+                Direction::Left => x = x.max(left_edge + cell + half),
             }
         }
-        Position {
-            x: i32::try_from(x).expect("movement stays within validated arena extents"),
-            y: i32::try_from(y).expect("movement stays within validated arena extents"),
-        }
+        Position::new(
+            WorldX::new(i32::try_from(x).expect("movement stays within validated arena extents")),
+            WorldY::new(i32::try_from(y).expect("movement stays within validated arena extents")),
+        )
     }
 
     pub fn tick(&self) -> u64 {
@@ -329,8 +487,9 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::{
-        Character, CharacterId, ConstructionError, Direction, Game, MovementCommand, MovementRules,
-        Position, Scenario, StepError, Terrain,
+        Arena, CellCoord, Character, CharacterId, Column, ConstructionError, Direction, Game,
+        MovementCommand, MovementRules, Position, Row, Scenario, StepError, Terrain, WorldX,
+        WorldY,
     };
 
     const ID: CharacterId = CharacterId::new(42);
@@ -357,13 +516,21 @@ mod tests {
         }
     }
 
+    fn point(x: i32, y: i32) -> Position {
+        Position::new(WorldX::new(x), WorldY::new(y))
+    }
+
+    fn cell(column: u32, row: u32) -> CellCoord {
+        CellCoord::new(Column::new(column), Row::new(row))
+    }
+
     fn assert_step(game: &mut Game, frame: &[MovementCommand], expected: Position) {
         let mut authored = scenario(
             game.arena().width(),
             game.arena().height(),
             game.arena().terrain().to_vec(),
-            expected.x,
-            expected.y,
+            expected.x().value(),
+            expected.y().value(),
         );
         authored.character.id = game.character().id;
         let expected_game = Game::new(authored.parse(*game.rules()).unwrap(), game.tick() + 1);
@@ -398,9 +565,55 @@ mod tests {
             terrain,
             character: Character {
                 id: ID,
-                position: Position { x, y },
+                position: point(x, y),
             },
         }
+    }
+
+    #[test]
+    fn arena_owns_typed_cell_conversion_and_row_major_terrain_access() {
+        let arena = Arena::new(
+            3,
+            2,
+            vec![
+                Terrain::Floor,
+                Terrain::Wall,
+                Terrain::Block,
+                Terrain::Block,
+                Terrain::Floor,
+                Terrain::Wall,
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(arena.cell_containing(point(255, 255)), Some(cell(0, 0)));
+        assert_eq!(arena.cell_containing(point(256, 255)), Some(cell(1, 0)));
+        assert_eq!(arena.cell_containing(point(255, 256)), Some(cell(0, 1)));
+        assert_eq!(arena.cell_containing(point(256, 256)), Some(cell(1, 1)));
+        assert_eq!(arena.cell_containing(point(767, 511)), Some(cell(2, 1)));
+        assert_eq!(arena.cell_containing(point(-1, 0)), None);
+        assert_eq!(arena.cell_containing(point(768, 0)), None);
+        assert_eq!(arena.cell_containing(point(0, 512)), None);
+        assert_eq!(arena.cell_center(cell(2, 1)), Some(point(640, 384)));
+        assert_eq!(
+            arena.cell_containing(arena.cell_center(cell(2, 1)).unwrap()),
+            Some(cell(2, 1))
+        );
+        assert_eq!(arena.cell_center(cell(3, 0)), None);
+        assert_eq!(arena.terrain_at(cell(1, 0)), Some(Terrain::Wall));
+        assert_eq!(arena.terrain_at(cell(2, 0)), Some(Terrain::Block));
+        assert_eq!(arena.terrain_at(cell(3, 0)), None);
+        assert_eq!(
+            arena.cells().collect::<Vec<_>>(),
+            [
+                (cell(0, 0), Terrain::Floor),
+                (cell(1, 0), Terrain::Wall),
+                (cell(2, 0), Terrain::Block),
+                (cell(0, 1), Terrain::Block),
+                (cell(1, 1), Terrain::Floor),
+                (cell(2, 1), Terrain::Wall),
+            ]
+        );
     }
 
     #[test]
@@ -420,7 +633,7 @@ mod tests {
     fn scenario_keeps_the_rules_that_make_its_starting_footprint_legal() {
         let character = Character {
             id: ID,
-            position: Position { x: 64, y: 128 },
+            position: point(64, 128),
         };
         assert_eq!(
             Scenario::new(
@@ -441,11 +654,7 @@ mod tests {
         )
         .unwrap();
         let mut game = Game::new(scenario, 0);
-        assert_step(
-            &mut game,
-            &[command(Direction::Right)],
-            Position { x: 192, y: 128 },
-        );
+        assert_step(&mut game, &[command(Direction::Right)], point(192, 128));
     }
 
     #[test]
@@ -476,38 +685,26 @@ mod tests {
             bad.width = width;
             bad.height = height;
             bad.terrain.clear();
-            bad.character.position.x = i32::MIN;
+            bad.character.position = point(i32::MIN, 128);
             assert_eq!(bad.parse(defaults), Err(InvalidDimensions));
         }
         for terrain in [vec![], vec![Terrain::Floor; 2]] {
             let mut bad = base.clone();
             bad.terrain = terrain;
-            bad.character.position.x = i32::MIN;
+            bad.character.position = point(i32::MIN, 128);
             assert_eq!(bad.parse(defaults), Err(TerrainLengthMismatch));
         }
         for position in [
-            Position { x: -1, y: 128 },
-            Position { x: 128, y: -1 },
-            Position { x: 95, y: 128 },
-            Position { x: 161, y: 128 },
-            Position { x: 128, y: 95 },
-            Position { x: 128, y: 161 },
-            Position {
-                x: i32::MIN,
-                y: 128,
-            },
-            Position {
-                x: i32::MAX,
-                y: 128,
-            },
-            Position {
-                x: 128,
-                y: i32::MIN,
-            },
-            Position {
-                x: 128,
-                y: i32::MAX,
-            },
+            point(-1, 128),
+            point(128, -1),
+            point(95, 128),
+            point(161, 128),
+            point(128, 95),
+            point(128, 161),
+            point(i32::MIN, 128),
+            point(i32::MAX, 128),
+            point(128, i32::MIN),
+            point(128, i32::MAX),
         ] {
             let mut bad = base.clone();
             bad.character.position = position;
@@ -568,32 +765,20 @@ mod tests {
             0,
         );
         for (direction, expected) in [
-            (Direction::Up, Position { x: 384, y: 368 }),
-            (Direction::Right, Position { x: 400, y: 384 }),
-            (Direction::Down, Position { x: 384, y: 400 }),
-            (Direction::Left, Position { x: 368, y: 384 }),
+            (Direction::Up, point(384, 368)),
+            (Direction::Right, point(400, 384)),
+            (Direction::Down, point(384, 400)),
+            (Direction::Left, point(368, 384)),
         ] {
             let mut game = base.clone();
             assert_step(&mut game, &[command(direction)], expected);
         }
         let mut game = base;
-        assert_step(&mut game, &[], Position { x: 384, y: 384 });
-        assert_step(
-            &mut game,
-            &[command(Direction::Right)],
-            Position { x: 400, y: 384 },
-        );
-        assert_step(
-            &mut game,
-            &[command(Direction::Right)],
-            Position { x: 416, y: 384 },
-        );
-        assert_step(&mut game, &[], Position { x: 416, y: 384 });
-        assert_step(
-            &mut game,
-            &[command(Direction::Left)],
-            Position { x: 400, y: 384 },
-        );
+        assert_step(&mut game, &[], point(384, 384));
+        assert_step(&mut game, &[command(Direction::Right)], point(400, 384));
+        assert_step(&mut game, &[command(Direction::Right)], point(416, 384));
+        assert_step(&mut game, &[], point(416, 384));
+        assert_step(&mut game, &[command(Direction::Left)], point(400, 384));
     }
 
     #[test]
@@ -601,30 +786,10 @@ mod tests {
         use Direction::*;
         let fast = MovementRules::new(192, 512).unwrap();
         let cases = [
-            (
-                rows(".#..", 128, 128),
-                fast,
-                Right,
-                Position { x: 160, y: 128 },
-            ),
-            (
-                rows(".+..", 128, 128),
-                fast,
-                Right,
-                Position { x: 160, y: 128 },
-            ),
-            (
-                rows("..#.", 896, 128),
-                fast,
-                Left,
-                Position { x: 864, y: 128 },
-            ),
-            (
-                rows("..+.", 896, 128),
-                fast,
-                Left,
-                Position { x: 864, y: 128 },
-            ),
+            (rows(".#..", 128, 128), fast, Right, point(160, 128)),
+            (rows(".+..", 128, 128), fast, Right, point(160, 128)),
+            (rows("..#.", 896, 128), fast, Left, point(864, 128)),
+            (rows("..+.", 896, 128), fast, Left, point(864, 128)),
             (
                 rows(
                     r#"
@@ -638,7 +803,7 @@ mod tests {
                 ),
                 fast,
                 Down,
-                Position { x: 128, y: 160 },
+                point(128, 160),
             ),
             (
                 rows(
@@ -653,7 +818,7 @@ mod tests {
                 ),
                 fast,
                 Down,
-                Position { x: 128, y: 160 },
+                point(128, 160),
             ),
             (
                 rows(
@@ -668,7 +833,7 @@ mod tests {
                 ),
                 fast,
                 Up,
-                Position { x: 128, y: 864 },
+                point(128, 864),
             ),
             (
                 rows(
@@ -683,19 +848,19 @@ mod tests {
                 ),
                 fast,
                 Up,
-                Position { x: 128, y: 864 },
+                point(128, 864),
             ),
             (
                 rows("..#..+..", 128, 128),
                 MovementRules::new(192, 1024).unwrap(),
                 Right,
-                Position { x: 416, y: 128 },
+                point(416, 128),
             ),
             (
                 rows("..#.+...", 1920, 128),
                 MovementRules::new(192, 1024).unwrap(),
                 Left,
-                Position { x: 1376, y: 128 },
+                point(1376, 128),
             ),
         ];
         for (authored, rules, direction, expected) in cases {
@@ -711,17 +876,17 @@ mod tests {
             0,
         );
         for x in [144, 160, 160] {
-            assert_step(&mut approaching, &[command(Right)], Position { x, y: 128 });
+            assert_step(&mut approaching, &[command(Right)], point(x, 128));
         }
     }
 
     #[test]
     fn floor_edges_are_solid_and_exact_contact_is_safe() {
         for (direction, expected) in [
-            (Direction::Up, Position { x: 128, y: 96 }),
-            (Direction::Right, Position { x: 160, y: 128 }),
-            (Direction::Down, Position { x: 128, y: 160 }),
-            (Direction::Left, Position { x: 96, y: 128 }),
+            (Direction::Up, point(128, 96)),
+            (Direction::Right, point(160, 128)),
+            (Direction::Down, point(128, 160)),
+            (Direction::Left, point(96, 128)),
         ] {
             let mut game = Game::new(
                 rows(".", 128, 128)
@@ -749,34 +914,22 @@ mod tests {
             assert_step(
                 &mut game,
                 &[command(Direction::Right)],
-                Position {
-                    x: 65536 - radius,
-                    y: radius + 1,
-                },
+                point(65536 - radius, radius + 1),
             );
             assert_step(
                 &mut game,
                 &[command(Direction::Up)],
-                Position {
-                    x: 65536 - radius,
-                    y: radius,
-                },
+                point(65536 - radius, radius),
             );
             assert_step(
                 &mut game,
                 &[command(Direction::Left)],
-                Position {
-                    x: 64512 - radius,
-                    y: radius,
-                },
+                point(64512 - radius, radius),
             );
             assert_step(
                 &mut game,
                 &[command(Direction::Down)],
-                Position {
-                    x: 64512 - radius,
-                    y: radius + 1024,
-                },
+                point(64512 - radius, radius + 1024),
             );
         }
     }
@@ -799,7 +952,7 @@ mod tests {
                     .unwrap(),
                 0,
             );
-            assert_step(&mut game, &[command(Direction::Up)], Position { x, y: 624 });
+            assert_step(&mut game, &[command(Direction::Up)], point(x, 624));
         }
         for x in [351, 417] {
             assert_eq!(
@@ -813,26 +966,10 @@ mod tests {
                 .unwrap(),
             0,
         );
-        assert_step(
-            &mut turn,
-            &[command(Direction::Right)],
-            Position { x: 416, y: 417 },
-        );
-        assert_step(
-            &mut turn,
-            &[command(Direction::Right)],
-            Position { x: 416, y: 417 },
-        );
-        assert_step(
-            &mut turn,
-            &[command(Direction::Up)],
-            Position { x: 416, y: 401 },
-        );
-        assert_step(
-            &mut turn,
-            &[command(Direction::Right)],
-            Position { x: 432, y: 401 },
-        );
+        assert_step(&mut turn, &[command(Direction::Right)], point(416, 417));
+        assert_step(&mut turn, &[command(Direction::Right)], point(416, 417));
+        assert_step(&mut turn, &[command(Direction::Up)], point(416, 401));
+        assert_step(&mut turn, &[command(Direction::Right)], point(432, 401));
 
         let mut corner = Game::new(
             rows(
@@ -847,11 +984,7 @@ mod tests {
             .unwrap(),
             0,
         );
-        assert_step(
-            &mut corner,
-            &[command(Direction::Right)],
-            Position { x: 176, y: 160 },
-        );
+        assert_step(&mut corner, &[command(Direction::Right)], point(176, 160));
         let mut blocked_corner = Game::new(
             rows(
                 r#"
@@ -868,7 +1001,7 @@ mod tests {
         assert_step(
             &mut blocked_corner,
             &[command(Direction::Right)],
-            Position { x: 160, y: 161 },
+            point(160, 161),
         );
         let mut spanning = Game::new(
             rows(
@@ -883,11 +1016,7 @@ mod tests {
             .unwrap(),
             0,
         );
-        assert_step(
-            &mut spanning,
-            &[command(Direction::Down)],
-            Position { x: 256, y: 272 },
-        );
+        assert_step(&mut spanning, &[command(Direction::Down)], point(256, 272));
         let mut perpendicular = Game::new(
             rows(
                 r#"
@@ -904,7 +1033,7 @@ mod tests {
         assert_step(
             &mut perpendicular,
             &[command(Direction::Right)],
-            Position { x: 400, y: 352 },
+            point(400, 352),
         );
     }
 
@@ -970,17 +1099,9 @@ mod tests {
     #[test]
     fn the_last_tick_succeeds_then_exhaustion_preserves_complete_state() {
         for (start, frame, expected) in [
-            (128, vec![], Position { x: 128, y: 128 }),
-            (
-                128,
-                vec![command(Direction::Right)],
-                Position { x: 144, y: 128 },
-            ),
-            (
-                160,
-                vec![command(Direction::Right)],
-                Position { x: 160, y: 128 },
-            ),
+            (128, vec![], point(128, 128)),
+            (128, vec![command(Direction::Right)], point(144, 128)),
+            (160, vec![command(Direction::Right)], point(160, 128)),
         ] {
             let authored = rows(".#", start, 128);
             let mut game = Game::new(
@@ -1000,7 +1121,7 @@ mod tests {
                 character: CharacterId::new(0),
                 direction: Direction::Right,
             }],
-            Position { x: 144, y: 128 },
+            point(144, 128),
         );
     }
 
@@ -1009,12 +1130,12 @@ mod tests {
     fn reference_legal(authored: &ScenarioInput, rules: MovementRules, position: Position) -> bool {
         let radius = i64::from(rules.footprint_side() / 2);
         let (left, right) = (
-            i64::from(position.x) - radius,
-            i64::from(position.x) + radius,
+            i64::from(position.x().value()) - radius,
+            i64::from(position.x().value()) + radius,
         );
         let (top, bottom) = (
-            i64::from(position.y) - radius,
-            i64::from(position.y) + radius,
+            i64::from(position.y().value()) - radius,
+            i64::from(position.y().value()) + radius,
         );
         if left < 0
             || top < 0
@@ -1052,10 +1173,7 @@ mod tests {
         };
         let mut position = authored.character.position;
         for _ in 0..rules.movement_distance() {
-            let next = Position {
-                x: position.x + dx,
-                y: position.y + dy,
-            };
+            let next = point(position.x().value() + dx, position.y().value() + dy);
             if !reference_legal(authored, rules, next) {
                 break;
             }

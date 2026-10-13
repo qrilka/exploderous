@@ -35,6 +35,9 @@ One simulation instance of a scenario, with its own evolving arena, objects, and
 One square area of an arena's terrain grid. A character can occupy parts of several cells at once.
 _Avoid_: Tile
 
+**Cell coordinate**:
+The zero-based column and row identifying one cell in an arena. It is distinct from a world-space position, which can lie between cells.
+
 **Footprint**:
 The area occupied by a character's body for movement collision and blast contact.
 _Avoid_: Collision body

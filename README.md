@@ -7,13 +7,13 @@ A Bomberman-clone in Rust with a focus on correctness through different testing 
 Install [rustup](https://rustup.rs/). Cargo commands automatically provision the Rust version, `rustfmt`, and `clippy` pinned in `rust-toolchain.toml`, both locally and in CI:
 
 ```sh
-cargo run --locked
+cargo run -p exploderous-tui --locked
 cargo fmt --all -- --check
 cargo clippy --all-targets --locked -- -D warnings
 cargo test --all-targets --locked
 ```
 
-The root executable is still a placeholder, with one temporary smoke test. The headless movement core lives in `crates/core` (package `exploderous-core`), with its movement checks in the `game.rs` test module. Root-level check commands cover both workspace members by default. CI runs formatting, Clippy (warnings fail), and tests on pushes and pull requests.
+The root is a virtual workspace. The separate movement playground is `crates/tui` (package `exploderous-tui`) and requires a terminal with Kitty keyboard-protocol support. Each run overwrites `app.log` with all terminal events, per-tick movement inputs and positions, and catch-up/error records; pasted contents are redacted. The headless movement core lives in `crates/core` (package `exploderous-core`); root-level check commands cover all workspace members. CI runs formatting, Clippy (warnings fail), and tests on pushes and pull requests.
 
 ## Current route
 
