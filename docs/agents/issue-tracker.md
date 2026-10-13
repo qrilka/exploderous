@@ -5,7 +5,9 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 ## Ticket branches
 
 - Before changing files for a ticket, create or reuse its dedicated `issue-<number>-<short-slug>` branch, such as `issue-1-headless-movement`, unless the user specifies another branch.
-- Use the branch's issue number to find the originating ticket/spec when implementing or reviewing work.
+- Before implementing, reviewing, or editing a ticket, resolve the target from the explicitly named issue or, if none is named, the active ticket branch; then read its live body and comments. Apply “this ticket” changes to that target and keep follow-ups separate unless named. If branch, issue, and requested scope disagree, clarify before editing.
+- If authorization or issue state is disputed, compare the session log with GitHub's current state before changing, closing, or recreating an issue. Ask if those records do not resolve the scope or authorization.
+- When the user approves behavior that differs from acceptance criteria, update the issue before treating the work as ready for review; record user-confirmed manual acceptance gates in an issue comment.
 - Commit subjects describe the change; include ticket numbers only when explicitly requested.
 - Once ticket work passes its checks and review, use `/pr` to draft the PR body. Show it to the user and get explicit approval before creating the PR; approval to implement or push is not PR approval.
 
