@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use exploderous_core::game::{
-    Character, CharacterId, Direction, Game, MovementCommand, MovementRules, Position, Scenario,
-    StepError, Terrain, WORLD_UNITS_PER_CELL,
+    CellCoord, Character, CharacterId, Column, Direction, Game, MovementCommand, MovementRules,
+    Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
 };
 use ratatui::{
     Frame,
@@ -15,11 +15,48 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub const TICK_INTERVAL: Duration = Duration::from_nanos(16_666_667);
 pub const MIN_WIDTH: u16 = 19;
-pub const MIN_HEIGHT: u16 = 10;
+pub const MIN_HEIGHT: u16 = 11;
 const MAX_CATCH_UP_TICKS: usize = 5;
 const MAP_SIZE: u16 = 9;
 const STATUS: &str = "Lives: 0 | Score: 0";
-const HELP: &str = "MOVEMENT PLAYGROUND\n\nControls\nArrow keys: move; latest press wins; release falls back\nR: reset; Q or Escape: quit\n?, h, or H: open or close help\nUp/Down: scroll; Escape closes help\n\nLive map\n(blank space) Floor\n█ Wall\n▒ Block\n@ Player\n\nReserved glyphs\na AI-controlled non-Enemy Character\ne Enemy Character (takes precedence over AI)\n● Bomb\n┼ Blast centre\n│ Blast north/south arms\n─ Blast east/west arms\n⬚ Exit\n▣ Bomb-capacity Item\n◈ Blast-reach Item";
+const HELP: &str = r#"MOVEMENT PLAYGROUND
+
+Controls
+Arrow keys: move; latest press wins; release falls back
+R: reset; Q or Escape: quit
+?, h, or H: open or close help
+Up/Down: scroll; Escape closes help
+Offset: signed X,Y world-unit delta from the current Cell centre; 0,0 is centred
+
+Live map
+(blank space) Floor
+█ Wall
+▒ Block
+@ Player
+
+Reserved glyphs
+a AI-controlled non-Enemy Character
+e Enemy Character (takes precedence over AI)
+● Bomb
+┼ Blast centre
+│ Blast north/south arms
+─ Blast east/west arms
+⬚ Exit
+▣ Bomb-capacity Item
+◈ Blast-reach Item"#;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TickRecord {
+    pub tick: u64,
+    pub direction: Option<Direction>,
+    pub position: Position,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct AdvanceReport {
+    pub ticks: Vec<TickRecord>,
+    pub discarded_ticks: u128,
+}
 
 pub struct App {
     game: Game,
@@ -104,34 +141,49 @@ impl App {
         self.clamp_help_scroll();
     }
 
-    pub fn advance(&mut self, now: Instant) -> Result<usize, StepError> {
+    pub fn advance(&mut self, now: Instant) -> Result<AdvanceReport, StepError> {
         self.reconcile_clock(now);
         let Some(deadline) = self.next_tick else {
-            return Ok(0);
+            return Ok(AdvanceReport {
+                ticks: Vec::new(),
+                discarded_ticks: 0,
+            });
         };
         if now < deadline {
-            return Ok(0);
+            return Ok(AdvanceReport {
+                ticks: Vec::new(),
+                discarded_ticks: 0,
+            });
         }
 
         let elapsed = now.duration_since(deadline);
         let overdue = elapsed.as_nanos() / TICK_INTERVAL.as_nanos() + 1;
-        let ticks = overdue.min(MAX_CATCH_UP_TICKS as u128) as usize;
-        let frame: Vec<_> = self
-            .held_direction()
+        let tick_count = overdue.min(MAX_CATCH_UP_TICKS as u128) as usize;
+        let direction = self.held_direction();
+        let frame: Vec<_> = direction
             .map(|direction| MovementCommand {
                 character: self.game.character().id,
                 direction,
             })
             .into_iter()
             .collect();
-        for _ in 0..ticks {
+        let mut ticks = Vec::with_capacity(tick_count);
+        for _ in 0..tick_count {
             self.game.step(&frame)?;
+            ticks.push(TickRecord {
+                tick: self.game.tick(),
+                direction,
+                position: self.game.character().position,
+            });
         }
 
         let remainder = elapsed.as_nanos() % TICK_INTERVAL.as_nanos();
         let until_next = TICK_INTERVAL.as_nanos() - remainder;
         self.next_tick = Some(now + Duration::from_nanos(until_next as u64));
-        Ok(ticks)
+        Ok(AdvanceReport {
+            ticks,
+            discarded_ticks: overdue - tick_count as u128,
+        })
     }
 
     pub fn game(&self) -> &Game {
@@ -222,38 +274,43 @@ fn direction(code: KeyCode) -> Option<Direction> {
 }
 
 fn new_game() -> Game {
-    let mut terrain = vec![Terrain::Floor; 81];
-    for row in 0..9_u32 {
-        for column in 0..9_u32 {
-            if row == 0
-                || row == 8
-                || column == 0
-                || column == 8
-                || (row.is_multiple_of(2) && column.is_multiple_of(2))
-            {
-                terrain[(row * 9 + column) as usize] = Terrain::Wall;
-            }
-        }
-    }
-    for (column, row) in [
-        (3, 1),
-        (5, 1),
-        (5, 3),
-        (1, 5),
-        (3, 5),
-        (7, 5),
-        (3, 7),
-        (5, 7),
-    ] {
-        terrain[(row * 9 + column) as usize] = Terrain::Block;
-    }
+    let blocks = [
+        CellCoord::new(Column::new(3), Row::new(1)),
+        CellCoord::new(Column::new(5), Row::new(1)),
+        CellCoord::new(Column::new(5), Row::new(3)),
+        CellCoord::new(Column::new(1), Row::new(5)),
+        CellCoord::new(Column::new(3), Row::new(5)),
+        CellCoord::new(Column::new(7), Row::new(5)),
+        CellCoord::new(Column::new(3), Row::new(7)),
+        CellCoord::new(Column::new(5), Row::new(7)),
+    ];
+    let terrain = (0..9_u32)
+        .flat_map(|row| {
+            let blocks = &blocks;
+            (0..9_u32).map(move |column| {
+                let cell = CellCoord::new(Column::new(column), Row::new(row));
+                if row == 0
+                    || row == 8
+                    || column == 0
+                    || column == 8
+                    || (row.is_multiple_of(2) && column.is_multiple_of(2))
+                {
+                    Terrain::Wall
+                } else if blocks.contains(&cell) {
+                    Terrain::Block
+                } else {
+                    Terrain::Floor
+                }
+            })
+        })
+        .collect();
     let scenario = Scenario::new(
         9,
         9,
         terrain,
         Character {
             id: CharacterId::new(0),
-            position: Position { x: 384, y: 384 },
+            position: Position::new(WorldX::new(384), WorldY::new(384)),
         },
         MovementRules::default(),
     )
@@ -265,7 +322,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         frame.render_widget(
-            Paragraph::new("Resize terminal to at least 19 columns × 10 rows.")
+            Paragraph::new("Resize terminal to at least 19 columns × 11 rows.")
                 .alignment(Alignment::Center)
                 .wrap(Wrap { trim: true }),
             area,
@@ -280,26 +337,31 @@ pub fn render(frame: &mut Frame, app: &App) {
 fn render_game(frame: &mut Frame, app: &App, area: Rect) {
     let map_x = area.x + (area.width - MAP_SIZE) / 2;
     let top = area.y + (area.height - MIN_HEIGHT) / 2;
-    let character_x = u32::try_from(app.game.character().position.x).unwrap()
-        / u32::try_from(WORLD_UNITS_PER_CELL).unwrap();
-    let character_y = u32::try_from(app.game.character().position.y).unwrap()
-        / u32::try_from(WORLD_UNITS_PER_CELL).unwrap();
+    let arena = app.game.arena();
+    let position = app.game.character().position;
+    let character_cell = arena
+        .cell_containing(position)
+        .expect("live Character position is within the Arena");
+    let center = arena
+        .cell_center(character_cell)
+        .expect("the Character's Cell is in the Arena");
+    let offset = format!(
+        "Offset: {:+04},{:+04}",
+        position.x().value() - center.x().value(),
+        position.y().value() - center.y().value(),
+    );
     let mut map = String::new();
-    for (index, terrain) in app.game.arena().terrain().iter().enumerate() {
-        let column = index % 9;
-        let row = index / 9;
-        map.push(
-            if column as u32 == character_x && row as u32 == character_y {
-                '@'
-            } else {
-                match terrain {
-                    Terrain::Floor => ' ',
-                    Terrain::Wall => '█',
-                    Terrain::Block => '▒',
-                }
-            },
-        );
-        if column == 8 && row != 8 {
+    for (cell, terrain) in arena.cells() {
+        map.push(if cell == character_cell {
+            '@'
+        } else {
+            match terrain {
+                Terrain::Floor => ' ',
+                Terrain::Wall => '█',
+                Terrain::Block => '▒',
+            }
+        });
+        if cell.column().value() + 1 == arena.width() && cell.row().value() + 1 < arena.height() {
             map.push('\n');
         }
     }
@@ -310,6 +372,10 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(
         Paragraph::new(STATUS).alignment(Alignment::Center),
         Rect::new(area.x, top + MAP_SIZE, area.width, 1),
+    );
+    frame.render_widget(
+        Paragraph::new(offset).alignment(Alignment::Center),
+        Rect::new(area.x, top + MAP_SIZE + 1, area.width, 1),
     );
 }
 

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use exploderous_tui::{App, render};
+use exploderous_tui::{App, TICK_INTERVAL, render};
 use ratatui::{Terminal, backend::TestBackend};
 use unicode_width::UnicodeWidthStr;
 
@@ -26,8 +26,8 @@ fn screen(terminal: &Terminal<TestBackend>) -> Vec<String> {
 
 #[test]
 fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
-    let app = App::new(Instant::now(), 19, 10);
-    let terminal = draw(&app, 19, 10);
+    let app = App::new(Instant::now(), 19, 11);
+    let terminal = draw(&app, 19, 11);
     let buffer = terminal.backend().buffer();
 
     assert_eq!(buffer[(5, 0)].symbol(), "█");
@@ -51,6 +51,7 @@ fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
         );
     }
     assert_eq!(screen(&terminal)[9], "Lives: 0 | Score: 0");
+    assert_eq!(screen(&terminal)[10].trim(), "Offset: +000,+000");
     for y in 0..9 {
         for x in 5..14 {
             assert_eq!(UnicodeWidthStr::width(buffer[(x, y)].symbol()), 1);
@@ -64,9 +65,28 @@ fn larger_terminal_centers_the_fixed_arena_and_status_below_it() {
     let terminal = draw(&app, 30, 20);
     let buffer = terminal.backend().buffer();
 
-    assert_eq!(buffer[(10, 5)].symbol(), "█");
-    assert_eq!(buffer[(11, 6)].symbol(), "@");
-    assert_eq!(screen(&terminal)[14].trim(), "Lives: 0 | Score: 0");
+    assert_eq!(buffer[(10, 4)].symbol(), "█");
+    assert_eq!(buffer[(11, 5)].symbol(), "@");
+    assert_eq!(screen(&terminal)[13].trim(), "Lives: 0 | Score: 0");
+    assert_eq!(screen(&terminal)[14].trim(), "Offset: +000,+000");
+}
+
+#[test]
+fn center_offset_tracks_movement_and_rebases_at_the_cell_boundary() {
+    let start = Instant::now();
+    let mut app = App::new(start, 19, 11);
+    app.handle_key(key(KeyCode::Down), start);
+
+    app.advance(start + TICK_INTERVAL).unwrap();
+    assert_eq!(screen(&draw(&app, 19, 11))[10].trim(), "Offset: +000,+016");
+
+    for tick in 2..=8 {
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    let terminal = draw(&app, 19, 11);
+    assert_eq!(screen(&terminal)[10].trim(), "Offset: +000,-128");
+    assert_eq!(terminal.backend().buffer()[(6, 2)].symbol(), "@");
+    assert_eq!(terminal.backend().buffer()[(6, 1)].symbol(), " ");
 }
 
 #[test]
@@ -83,6 +103,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "█ Wall",
         "▒ Block",
         "@ Player",
+        "Offset: signed X,Y world-unit delta from the current Cell centre; 0,0 is centred",
         "a AI-controlled non-Enemy Character",
         "e Enemy Character (takes precedence over AI)",
         "● Bomb",
@@ -96,12 +117,12 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         assert!(text.contains(entry), "missing {entry:?} in:\n{text}");
     }
 
-    let mut narrow = App::new(now, 19, 10);
+    let mut narrow = App::new(now, 19, 11);
     narrow.handle_key(key(KeyCode::Char('?')), now);
     for _ in 0..100 {
         narrow.handle_key(key(KeyCode::Down), now);
     }
-    let terminal = draw(&narrow, 19, 10);
+    let terminal = draw(&narrow, 19, 11);
     assert!(screen(&terminal).join("\n").contains("◈ Blast-reach Item"));
 }
 
@@ -114,9 +135,11 @@ fn every_live_and_reserved_glyph_occupies_one_terminal_column() {
 
 #[test]
 fn undersized_terminal_shows_resize_instructions_instead_of_the_map() {
-    let app = App::new(Instant::now(), 18, 10);
-    let terminal = draw(&app, 18, 10);
-    let text = screen(&terminal).join("\n");
-    assert!(text.contains("Resize terminal"));
-    assert!(!text.contains("Lives: 0 | Score: 0"));
+    for (width, height) in [(18, 10), (19, 10)] {
+        let app = App::new(Instant::now(), width, height);
+        let terminal = draw(&app, width, height);
+        let text = screen(&terminal).join("\n");
+        assert!(text.contains("Resize terminal"));
+        assert!(!text.contains("Lives: 0 | Score: 0"));
+    }
 }
