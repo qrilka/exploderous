@@ -45,7 +45,7 @@ The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) resolv
 After the movement slice, build a minimal TUI around the same validated construction, tick-input, and read-only observation interface. This is a movement playground, not yet a complete Normal level:
 
 - The root is a virtual Cargo workspace; `crates/tui` owns the runnable app, depends on `exploderous-core`, and uses Ratatui with Crossterm.
-- Use one fixed 9×9 classic arena with a Wall border and pillars at interior Cells whose zero-based row and column are both even. The player starts at the centre of zero-based Cell `(1,1)` (world position `(384,384)`). Blocks occupy `(3,1)`, `(5,1)`, `(5,3)`, `(1,5)`, `(3,5)`, `(7,5)`, `(3,7)`, and `(5,7)` (coordinates are column, row).
+- Use one fixed 9×9 classic arena with a Wall border and pillars at interior Cells whose zero-based row and column are both even. The player starts at the centre of zero-based Cell `(1,1)` (world position `(384,384)`). For the [turn-assistance playtest](https://github.com/qrilka/exploderous/issues/5), retain only the existing Blocks at `(5,3)` and `(5,7)` (coordinates are column, row). This deliberately replaces the initial eight-Block layout so most corridors remain open; arena dimensions, Wall border, pillars, and starting position stay unchanged.
 - Render one contiguous glyph per Cell, with no inter-cell padding. Draw the Character in the Cell containing its centre; sub-cell movement is intentionally not visible in the map. Do not show the former position/speed/footprint telemetry.
 - Use the fixed glyphs below. In the live movement view, only Floor, Wall, Block, and the player Character are present; help also documents the reserved future glyphs.
 

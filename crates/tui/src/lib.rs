@@ -279,13 +279,7 @@ fn direction(code: KeyCode) -> Option<Direction> {
 
 fn new_game(rules: MovementRules) -> Game {
     let blocks = [
-        CellCoord::new(Column::new(3), Row::new(1)),
-        CellCoord::new(Column::new(5), Row::new(1)),
         CellCoord::new(Column::new(5), Row::new(3)),
-        CellCoord::new(Column::new(1), Row::new(5)),
-        CellCoord::new(Column::new(3), Row::new(5)),
-        CellCoord::new(Column::new(7), Row::new(5)),
-        CellCoord::new(Column::new(3), Row::new(7)),
         CellCoord::new(Column::new(5), Row::new(7)),
     ];
     let terrain = (0..9_u32)

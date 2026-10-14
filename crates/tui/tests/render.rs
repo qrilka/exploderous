@@ -34,22 +34,28 @@ fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
     assert_eq!(buffer[(6, 1)].symbol(), "@");
     assert_eq!(buffer[(7, 2)].symbol(), "█");
     assert_eq!(buffer[(7, 1)].symbol(), " ");
-    for (column, row) in [
-        (3, 1),
-        (5, 1),
-        (5, 3),
-        (1, 5),
-        (3, 5),
-        (7, 5),
-        (3, 7),
-        (5, 7),
-    ] {
+    for (column, row) in [(5, 3), (5, 7)] {
         assert_eq!(
             buffer[(5 + column, row)].symbol(),
             "▒",
             "cell=({column},{row})"
         );
     }
+    for (column, row) in [(3, 1), (5, 1), (1, 5), (3, 5), (7, 5), (3, 7)] {
+        assert_eq!(
+            buffer[(5 + column, row)].symbol(),
+            " ",
+            "cleared Cell=({column},{row})"
+        );
+    }
+    assert_eq!(
+        buffer
+            .content()
+            .iter()
+            .filter(|cell| cell.symbol() == "▒")
+            .count(),
+        2
+    );
     assert_eq!(screen(&terminal)[9], "Lives: 0 | Score: 0");
     assert_eq!(screen(&terminal)[10].trim(), "Offset: +000,+000");
     for y in 0..9 {

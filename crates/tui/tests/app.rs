@@ -226,6 +226,43 @@ fn assisted_and_strict_rules_drive_turns_and_survive_reset() {
 }
 
 #[test]
+fn a_turn_past_a_cell_boundary_corrects_safely_and_release_stops_correction() {
+    let start = Instant::now();
+    let mut app = App::new(start, 19, 11);
+    let mut tick = 0;
+    for (code, ticks) in [
+        (KeyCode::Down, 30),
+        (KeyCode::Right, 30),
+        (KeyCode::Down, 11),
+    ] {
+        app.handle_key(press(code), start + TICK_INTERVAL * tick);
+        for _ in 0..ticks {
+            tick += 1;
+            app.advance(start + TICK_INTERVAL * tick).unwrap();
+        }
+        app.handle_key(release(code), start + TICK_INTERVAL * tick);
+    }
+    assert_eq!(app.game().character().position, point(864, 1040));
+    app.handle_key(press(KeyCode::Left), start + TICK_INTERVAL * tick);
+    tick += 1;
+    app.advance(start + TICK_INTERVAL * tick).unwrap();
+    assert_eq!(app.game().character().position, point(864, 1024));
+    app.handle_key(release(KeyCode::Left), start + TICK_INTERVAL * tick);
+    tick += 1;
+    app.advance(start + TICK_INTERVAL * tick).unwrap();
+    assert_eq!(app.game().character().position, point(864, 1024));
+    app.handle_key(press(KeyCode::Left), start + TICK_INTERVAL * tick);
+    for _ in 0..6 {
+        tick += 1;
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    assert_eq!(app.game().character().position, point(864, 928));
+    tick += 1;
+    app.advance(start + TICK_INTERVAL * tick).unwrap();
+    assert_eq!(app.game().character().position, point(848, 928));
+}
+
+#[test]
 fn unknown_startup_options_are_rejected_before_terminal_initialization() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_exploderous-tui"))
         .arg("--unknown")

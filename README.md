@@ -24,7 +24,7 @@ cargo run -p exploderous-tui --locked
 cargo run -p exploderous-tui --locked -- --strict-movement
 ```
 
-Both modes retain the canonical Footprint and movement speed; `R` resets without changing the selected mode. The session-start entry in `app.log` records `turn_assistance`. See the [movement contract](docs/design/game-state.md#turn-assistance): assistance clears an eligible corner gradually, but does not guarantee a zero centre offset.
+Both modes use the [two-Block playtest arena](docs/project-plan.md#following-slice-movement-tui-playtest) and retain the canonical Footprint and movement speed; `R` resets without changing the selected mode. The session-start entry in `app.log` records `turn_assistance`. See the [movement contract](docs/design/game-state.md#turn-assistance): assistance clears an eligible corner gradually, but does not guarantee a zero centre offset.
 
 Manual acceptance for [issue #5](https://github.com/qrilka/exploderous/issues/5) requires comparing both modes in a compatible terminal: turns along both axes and in both directions, clear travel, blocked/unsafe turns, releases and direction changes. Watch the offset readout during correction and after entering the corridor; headless tests cannot establish whether the feel is understandable.
 

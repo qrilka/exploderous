@@ -94,9 +94,11 @@ Movement:
 For each commanded tick:
 
 1. Calculate ordinary cardinal movement with full-path collision checks. If it completes the requested distance, use that result unchanged.
-2. If ordinary movement is shortened, consider assistance only when the perpendicular offset from the current Cell's centreline is within ±80 world units, inclusive. This fixed window applies to all valid Footprint sizes and movement distances.
-3. Search toward that centreline, not away from it or toward another Cell. Choose the smallest positive integer correction for which the entire perpendicular path is legal and a full requested forward step from the corrected position is legal. Both segments respect the complete Footprint, terrain, and arena bounds; a legal destination does not justify crossing an intervening obstruction.
+2. If ordinary movement is shortened, consider corrections in both perpendicular directions, up to 128 world units of actual sideways correction, inclusive (half a Cell). This limit applies to all valid Footprint sizes and movement distances; offset from the current Cell centreline does not determine eligibility.
+3. Choose the smallest positive integer correction for which the entire perpendicular path is legal and a full requested forward step from the corrected position is legal. A correction may point away from the current Cell centreline or cross a Cell boundary. Both segments respect the complete Footprint, terrain, and arena bounds; a legal destination does not justify crossing an intervening obstruction.
 4. If such a correction exists, begin at the original position for the tick. Spend the shared movement-distance budget on correction first, then any remainder on forward movement. Otherwise use the ordinary result, including any partial progress. Do not drift sideways if the proposed forward path remains blocked.
+
+At most one perpendicular direction can have a safe entry within this limit. Ordinary movement shortened by terrain overlaps at least one blocking Cell along its proposed forward path. Clearing opposite sides of that Cell requires entry positions separated by at least one Cell plus the Footprint side, greater than the 256 units spanned by two opposite 128-unit corrections. Thus the current terrain/Footprint model needs no tie-break. A forward arena-boundary violation cannot be repaired by perpendicular correction.
 
 A correction larger than the budget takes multiple commanded ticks. Eligibility and the nearest legal correction are recomputed each tick; there is no remembered direction or pending alignment. Empty input stops immediately, and a changed command uses its own geometry. Once ordinary movement becomes legal, assistance stops: it permits entry, not guaranteed centering. For example, at the canonical defaults, a corridor entry requiring 32 units of sideways correction consumes two 16-unit ticks; forward travel resumes on the next tick, potentially still 32 units off-centre. Clear cardinal travel is never recentered.
 
@@ -227,7 +229,7 @@ All methods exercise production construction and movement routines; there is no 
 | Method | Intended evidence |
 | --- | --- |
 | Coordinate conversions | Cell-boundary positions, negative/out-of-Arena positions, cell centres, and row-major access on non-square arenas |
-| Worked examples | Each direction, exact contact, off-centre corridor entry, inclusive assistance-window boundaries, shared correction/forward budget, partial stopping, crossed obstacles, borders, blocked and free paths in assisted and strict modes |
+| Worked examples | Each direction, exact contact, off-centre corridor entry, inclusive actual-correction-limit boundaries, shared correction/forward budget, partial stopping, crossed obstacles, borders, blocked and free paths in assisted and strict modes |
 | Validation/error tests | Bad dimensions/lengths/positions/parameters, limits and arithmetic edges, duplicate identities/commands, and unchanged complete state on rejected frames |
 | Independent movement reference | On bounded scenarios in both modes, advance each candidate correction/forward path one world unit at a time using independent overlap geometry and compare the resulting position to production movement |
 | Deterministic sequence tests | Check invariants throughout action sequences; capture initial state, parameters, inputs, and generator seed for reproduction |
