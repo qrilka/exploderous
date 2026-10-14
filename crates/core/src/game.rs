@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 /// Simulation units, not pixels. Cell intervals are lower-inclusive, upper-exclusive.
 pub const WORLD_UNITS_PER_CELL: i32 = 256;
+const MAX_TURN_CORRECTION: u32 = (WORLD_UNITS_PER_CELL / 2) as u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Terrain {
@@ -101,6 +102,18 @@ impl Position {
     pub const fn y(self) -> WorldY {
         self.y
     }
+
+    // Movement starts inside a validated arena; even the maximum step fits i32.
+    fn advanced(self, direction: Direction, distance: u32) -> Self {
+        let distance = i32::try_from(distance).expect("movement distance fits i32");
+        let (dx, dy) = match direction {
+            Direction::Up => (0, -distance),
+            Direction::Right => (distance, 0),
+            Direction::Down => (0, distance),
+            Direction::Left => (-distance, 0),
+        };
+        Self::new(WorldX::new(self.x.0 + dx), WorldY::new(self.y.0 + dy))
+    }
 }
 
 /// A zero-based Cell address. Arena operations check whether it is in bounds.
@@ -172,10 +185,12 @@ impl Scenario {
 pub struct MovementRules {
     footprint_side: u32,
     movement_distance: u32,
+    turn_assistance: bool,
 }
 
 impl MovementRules {
     /// Parse an even footprint side in 2..=254 and a movement distance in 1..=1024.
+    /// Turn assistance is enabled; use `with_turn_assistance(false)` for strict movement.
     /// If both are invalid, the footprint error takes priority.
     pub fn new(footprint_side: u32, movement_distance: u32) -> Result<Self, ConstructionError> {
         if !(2..=254).contains(&footprint_side) || !footprint_side.is_multiple_of(2) {
@@ -187,6 +202,7 @@ impl MovementRules {
         Ok(Self {
             footprint_side,
             movement_distance,
+            turn_assistance: true,
         })
     }
 
@@ -196,6 +212,16 @@ impl MovementRules {
 
     pub fn movement_distance(&self) -> u32 {
         self.movement_distance
+    }
+
+    /// Select assisted or strict movement before constructing a scenario/game.
+    pub fn with_turn_assistance(mut self, enabled: bool) -> Self {
+        self.turn_assistance = enabled;
+        self
+    }
+
+    pub fn turn_assistance(&self) -> bool {
+        self.turn_assistance
     }
 }
 
@@ -420,12 +446,50 @@ impl Game {
     }
 
     fn moved_position(&self, direction: Direction) -> Position {
+        let start = self.character.position;
+        let distance = self.rules.movement_distance;
+        let ordinary = self.swept_position(start, direction, distance);
+        if !self.rules.turn_assistance || ordinary == start.advanced(direction, distance) {
+            return ordinary;
+        }
+
+        let perpendicular = match direction {
+            Direction::Up | Direction::Down => [Direction::Left, Direction::Right],
+            Direction::Left | Direction::Right => [Direction::Up, Direction::Down],
+        };
+        // A sweep gives each correction's safe prefix, including intervening
+        // terrain and arena bounds. Search nearest-first within those prefixes.
+        let corrections = perpendicular.map(|side| {
+            let end = self.swept_position(start, side, MAX_TURN_CORRECTION);
+            let reach = (end.x.0 - start.x.0).unsigned_abs() + (end.y.0 - start.y.0).unsigned_abs();
+            (side, reach)
+        });
+        let max_correction = corrections.iter().map(|(_, reach)| *reach).max().unwrap();
+        for correction in 1..=max_correction {
+            for (side, reach) in corrections {
+                if correction > reach {
+                    continue;
+                }
+                let aligned = start.advanced(side, correction);
+                if self.swept_position(aligned, direction, distance)
+                    == aligned.advanced(direction, distance)
+                {
+                    let spent = correction.min(distance);
+                    let corrected = start.advanced(side, spent);
+                    return self.swept_position(corrected, direction, distance - spent);
+                }
+            }
+        }
+        ordinary
+    }
+
+    fn swept_position(&self, start: Position, direction: Direction, distance: u32) -> Position {
         let half = i64::from(self.rules.footprint_side / 2);
-        let distance = i64::from(self.rules.movement_distance);
+        let distance = i64::from(distance);
         let cell = i64::from(WORLD_UNITS_PER_CELL);
-        let mut x = i64::from(self.character.position.x().value());
-        let mut y = i64::from(self.character.position.y().value());
-        let mut swept = Rect::footprint(self.character.position, self.rules);
+        let mut x = i64::from(start.x().value());
+        let mut y = i64::from(start.y().value());
+        let mut swept = Rect::footprint(start, self.rules);
         // Clip to the arena, then inspect every cell with positive-area swept overlap.
         // Cardinal motion leaves the perpendicular interval unchanged, so each such
         // obstacle limits the centre to its near face plus/minus the footprint radius.
@@ -935,7 +999,244 @@ mod tests {
     }
 
     #[test]
-    fn off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_character() {
+    fn a_blocked_turn_spends_its_tick_budget_on_the_nearest_legal_entry() {
+        let mut game = Game::new(
+            rows("...\n.#.\n...", 192, 160)
+                .parse(MovementRules::default())
+                .unwrap(),
+            0,
+        );
+        assert_step(&mut game, &[command(Direction::Down)], point(176, 160));
+        let mut changed_direction = game.clone();
+        assert_step(
+            &mut changed_direction,
+            &[command(Direction::Right)],
+            point(192, 160),
+        );
+        assert_step(
+            &mut changed_direction,
+            &[command(Direction::Down)],
+            point(176, 160),
+        );
+        assert_rejected(
+            &mut game,
+            &[command(Direction::Down), command(Direction::Up)],
+            StepError::DuplicateCommand,
+        );
+        assert_step(&mut game, &[], point(176, 160));
+        assert_step(&mut game, &[command(Direction::Down)], point(160, 160));
+        assert_step(&mut game, &[command(Direction::Down)], point(160, 176));
+    }
+
+    #[test]
+    fn a_safe_entry_can_be_away_from_the_current_cell_centreline() {
+        let mut game = Game::new(
+            rows("...\n#..\n...", 352, 272)
+                .parse(MovementRules::default())
+                .unwrap(),
+            0,
+        );
+        // The current Cell centreline is y=384 (Down), but the nearest safe
+        // Left entry is y=160 (Up): 112 units of real correction.
+        for y in [256, 240, 224, 208, 192, 176, 160] {
+            assert_step(&mut game, &[command(Direction::Left)], point(352, y));
+        }
+        assert_step(&mut game, &[command(Direction::Left)], point(336, 160));
+    }
+
+    #[test]
+    fn assistance_is_symmetric_and_ignores_current_cell_offsets() {
+        use Direction::*;
+        // A central pillar with Floor on every side. All coordinates are worked
+        // examples at Footprint 192 / speed 16, independent of collision helpers.
+        for (x, y, direction, expected) in [
+            (208, 160, Down, point(192, 160)),
+            (209, 160, Down, point(193, 160)), // formerly rejected at offset +81
+            (560, 160, Down, point(576, 160)),
+            (559, 160, Down, point(575, 160)), // formerly rejected at offset -81
+            (208, 608, Up, point(192, 608)),
+            (560, 608, Up, point(576, 608)),
+            (160, 208, Right, point(160, 192)),
+            (160, 209, Right, point(160, 193)),
+            (160, 560, Right, point(160, 576)),
+            (160, 559, Right, point(160, 575)),
+            (608, 208, Left, point(608, 192)),
+            (608, 560, Left, point(608, 576)),
+            (161, 160, Down, point(160, 175)), // one sideways + fifteen forward
+            (160, 160, Down, point(160, 176)), // legal edge: no correction
+            (159, 160, Down, point(159, 176)), // legal off-centre travel unchanged
+            (128, 150, Down, point(128, 166)), // centred and clear
+            (160, 384, Up, point(160, 368)),   // parallel travel unchanged
+            (160, 384, Down, point(160, 400)),
+            (192, 150, Down, point(176, 150)), // correction first, not partial forward
+        ] {
+            let mut game = Game::new(
+                rows("...\n.#.\n...", x, y)
+                    .parse(MovementRules::default())
+                    .unwrap(),
+                0,
+            );
+            assert_step(&mut game, &[command(direction)], expected);
+        }
+    }
+
+    #[test]
+    fn the_actual_correction_limit_is_inclusive_in_both_axes_and_directions() {
+        use Direction::*;
+        // Nearest legal edges are 160 and 608. Required corrections are
+        // 127, 128, or 129 units; a >128 correction must retain the strict stop.
+        for (coordinate, corrected) in [
+            (287, 271),
+            (288, 272),
+            (289, 289),
+            (479, 479),
+            (480, 496),
+            (481, 497),
+        ] {
+            for (direction, start, expected) in [
+                (Down, point(coordinate, 160), point(corrected, 160)),
+                (Up, point(coordinate, 608), point(corrected, 608)),
+                (Right, point(160, coordinate), point(160, corrected)),
+                (Left, point(608, coordinate), point(608, corrected)),
+            ] {
+                let authored = rows("...\n.#.\n...", start.x().value(), start.y().value());
+                let mut assisted =
+                    Game::new(authored.clone().parse(MovementRules::default()).unwrap(), 0);
+                let mut strict = Game::new(
+                    authored
+                        .parse(MovementRules::default().with_turn_assistance(false))
+                        .unwrap(),
+                    0,
+                );
+                assert_step(&mut assisted, &[command(direction)], expected);
+                assert_step(&mut strict, &[command(direction)], start);
+            }
+        }
+    }
+
+    #[test]
+    fn reported_playtest_stalls_reach_safe_entries_but_real_walls_stay_blocked() {
+        let layout = "#########\n#.......#\n#.#.#.#.#\n#....+..#\n#.#.#.#.#\n#.......#\n#.#.#.#.#\n#....+..#\n#########";
+        for (start, direction, ticks, entry, after_forward) in [
+            (
+                point(864, 768),
+                Direction::Left,
+                6,
+                point(864, 864),
+                point(848, 864),
+            ),
+            (
+                point(864, 1008),
+                Direction::Left,
+                5,
+                point(864, 928),
+                point(848, 928),
+            ),
+            (
+                point(1008, 928),
+                Direction::Down,
+                5,
+                point(928, 928),
+                point(928, 944),
+            ),
+            (
+                point(864, 1040),
+                Direction::Left,
+                7,
+                point(864, 928),
+                point(848, 928),
+            ),
+            (
+                point(864, 784),
+                Direction::Left,
+                5,
+                point(864, 864),
+                point(848, 864),
+            ),
+            (
+                point(352, 528),
+                Direction::Left,
+                8,
+                point(352, 528),
+                point(352, 528),
+            ),
+        ] {
+            let mut game = Game::new(
+                rows(layout, start.x().value(), start.y().value())
+                    .parse(MovementRules::default())
+                    .unwrap(),
+                0,
+            );
+            for _ in 0..ticks {
+                game.step(&[command(direction)]).unwrap();
+            }
+            assert_eq!(game.character().position, entry);
+            assert_eq!(game.tick(), ticks);
+            assert_step(&mut game, &[command(direction)], after_forward);
+        }
+    }
+
+    #[test]
+    fn assistance_cannot_cross_an_obstruction_to_reach_a_forward_opening() {
+        let mut game = Game::new(
+            rows(".#.\n#..\n#..", 257, 257)
+                .parse(MovementRules::new(2, 1).unwrap())
+                .unwrap(),
+            0,
+        );
+        // The Left opening above is only two units away, but the Up
+        // correction would penetrate the Wall directly above the Character.
+        assert_step(&mut game, &[command(Direction::Left)], point(257, 257));
+    }
+
+    #[test]
+    fn assistance_never_drifts_toward_a_blocked_or_unsafe_forward_path() {
+        use Direction::*;
+        for (layout, start, distance, direction, expected) in [
+            ("...\n.+.\n...", point(192, 160), 16, Down, point(176, 160)),
+            ("...\n###\n...", point(192, 150), 16, Down, point(192, 160)),
+            ("...\n+++\n...", point(192, 160), 16, Down, point(192, 160)),
+            (
+                "...\n.#.\n#..\n...\n...",
+                point(192, 160),
+                1024,
+                Down,
+                point(192, 160),
+            ),
+            (
+                "...\n.+.\n+..\n...\n...",
+                point(192, 160),
+                1024,
+                Down,
+                point(192, 160),
+            ),
+            (
+                "...\n.#.\n...",
+                point(192, 160),
+                1024,
+                Down,
+                point(192, 160),
+            ),
+            ("...\n...\n...", point(192, 96), 16, Up, point(192, 96)),
+            ("...\n...\n...", point(96, 192), 16, Left, point(96, 192)),
+            ("...\n...\n...", point(672, 576), 16, Right, point(672, 576)),
+            ("...\n...\n...", point(576, 672), 16, Down, point(576, 672)),
+            // The nearest safe entry is 144 units away: beyond the correction limit.
+            ("...\n.#.\n...", point(464, 160), 16, Down, point(464, 160)),
+        ] {
+            let mut game = Game::new(
+                rows(layout, start.x().value(), start.y().value())
+                    .parse(MovementRules::new(192, distance).unwrap())
+                    .unwrap(),
+                0,
+            );
+            assert_step(&mut game, &[command(direction)], expected);
+        }
+    }
+
+    #[test]
+    fn strict_off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_character() {
+        let strict = MovementRules::default().with_turn_assistance(false);
         let classic = r#"
 #######
 #.....#
@@ -946,26 +1247,16 @@ mod tests {
 #######
 "#;
         for x in [352, 416] {
-            let mut game = Game::new(
-                rows(classic, x, 640)
-                    .parse(MovementRules::default())
-                    .unwrap(),
-                0,
-            );
+            let mut game = Game::new(rows(classic, x, 640).parse(strict).unwrap(), 0);
             assert_step(&mut game, &[command(Direction::Up)], point(x, 624));
         }
         for x in [351, 417] {
             assert_eq!(
-                rows(classic, x, 640).parse(MovementRules::default()),
+                rows(classic, x, 640).parse(strict),
                 Err(ConstructionError::InvalidStartingPosition)
             );
         }
-        let mut turn = Game::new(
-            rows(classic, 400, 417)
-                .parse(MovementRules::default())
-                .unwrap(),
-            0,
-        );
+        let mut turn = Game::new(rows(classic, 400, 417).parse(strict).unwrap(), 0);
         assert_step(&mut turn, &[command(Direction::Right)], point(416, 417));
         assert_step(&mut turn, &[command(Direction::Right)], point(416, 417));
         assert_step(&mut turn, &[command(Direction::Up)], point(416, 401));
@@ -980,7 +1271,7 @@ mod tests {
                 160,
                 160,
             )
-            .parse(MovementRules::default())
+            .parse(strict)
             .unwrap(),
             0,
         );
@@ -994,7 +1285,7 @@ mod tests {
                 160,
                 161,
             )
-            .parse(MovementRules::default())
+            .parse(strict)
             .unwrap(),
             0,
         );
@@ -1012,7 +1303,7 @@ mod tests {
                 256,
                 256,
             )
-            .parse(MovementRules::default())
+            .parse(strict)
             .unwrap(),
             0,
         );
@@ -1026,7 +1317,7 @@ mod tests {
                 384,
                 352,
             )
-            .parse(MovementRules::default())
+            .parse(strict)
             .unwrap(),
             0,
         );
@@ -1160,19 +1451,24 @@ mod tests {
         true
     }
 
-    fn reference_move(
-        authored: &ScenarioInput,
-        rules: MovementRules,
-        direction: Direction,
-    ) -> Position {
-        let (dx, dy) = match direction {
+    fn reference_direction_delta(direction: Direction) -> (i32, i32) {
+        match direction {
             Direction::Up => (0, -1),
             Direction::Right => (1, 0),
             Direction::Down => (0, 1),
             Direction::Left => (-1, 0),
-        };
-        let mut position = authored.character.position;
-        for _ in 0..rules.movement_distance() {
+        }
+    }
+
+    fn reference_cardinal(
+        authored: &ScenarioInput,
+        rules: MovementRules,
+        mut position: Position,
+        direction: Direction,
+        distance: u32,
+    ) -> Position {
+        let (dx, dy) = reference_direction_delta(direction);
+        for _ in 0..distance {
             let next = point(position.x().value() + dx, position.y().value() + dy);
             if !reference_legal(authored, rules, next) {
                 break;
@@ -1182,73 +1478,170 @@ mod tests {
         position
     }
 
+    fn reference_move(
+        authored: &ScenarioInput,
+        rules: MovementRules,
+        direction: Direction,
+    ) -> Position {
+        let start = authored.character.position;
+        let distance = rules.movement_distance();
+        let (dx, dy) = reference_direction_delta(direction);
+        let ordinary = reference_cardinal(authored, rules, start, direction, distance);
+        let desired = point(
+            start.x().value() + dx * distance as i32,
+            start.y().value() + dy * distance as i32,
+        );
+        if !rules.turn_assistance() || ordinary == desired {
+            return ordinary;
+        }
+        // A sideways correction cannot repair a forward arena-boundary violation.
+        let radius = (rules.footprint_side() / 2) as i32;
+        let (forward, extent) = if dx == 0 {
+            (desired.y().value(), authored.height)
+        } else {
+            (desired.x().value(), authored.width)
+        };
+        if !(radius..=extent as i32 * 256 - radius).contains(&forward) {
+            return ordinary;
+        }
+        let perpendicular = if dx == 0 {
+            [(-1, 0), (1, 0)]
+        } else {
+            [(0, -1), (0, 1)]
+        };
+        let mut best: Option<(u32, i32, i32)> = None;
+        // Independently walk each complete sideways route one unit at a time,
+        // then compare its nearest safe entry with the other route's entry.
+        for (sx, sy) in perpendicular {
+            for correction in 1..=128 {
+                let candidate = point(
+                    start.x().value() + sx * correction as i32,
+                    start.y().value() + sy * correction as i32,
+                );
+                if !reference_legal(authored, rules, candidate) {
+                    break;
+                }
+                let desired = point(
+                    candidate.x().value() + dx * distance as i32,
+                    candidate.y().value() + dy * distance as i32,
+                );
+                if reference_cardinal(authored, rules, candidate, direction, distance) == desired {
+                    let entry = (correction, sx, sy);
+                    best = Some(best.map_or(entry, |other| other.min(entry)));
+                    break;
+                }
+            }
+        }
+        if let Some((correction, sx, sy)) = best {
+            let spent = correction.min(distance);
+            let partial = point(
+                start.x().value() + sx * spent as i32,
+                start.y().value() + sy * spent as i32,
+            );
+            return reference_cardinal(authored, rules, partial, direction, distance - spent);
+        }
+        ordinary
+    }
+
     #[test]
-    fn exhaustive_two_by_two_terrain_matches_the_independent_unit_step_reference() {
-        for assignment in 0..81 {
-            let mut digits = assignment;
-            let terrain: Vec<_> = (0..4)
-                .map(|_| {
-                    let value = [Terrain::Floor, Terrain::Wall, Terrain::Block][digits % 3];
-                    digits /= 3;
-                    value
-                })
-                .collect();
-            for side in [2, 128, 192, 254] {
-                let r = (side / 2) as i32;
-                let mut coordinates = vec![
-                    r,
-                    128,
-                    256 - r,
-                    256 - r + 1,
-                    256,
-                    256 + r - 1,
-                    256 + r,
-                    384,
-                    512 - r,
-                ];
-                coordinates.sort_unstable();
-                coordinates.dedup();
-                for &x in &coordinates {
-                    for &y in &coordinates {
-                        let authored = scenario(2, 2, terrain.clone(), x, y);
-                        for distance in [1, 16, 255, 256, 257, 1024] {
-                            let rules = MovementRules::new(side, distance).unwrap();
-                            let constructed = authored.clone().parse(rules);
-                            if !reference_legal(&authored, rules, authored.character.position) {
-                                assert_eq!(
-                                    constructed,
-                                    Err(ConstructionError::InvalidStartingPosition),
-                                    "scenario={authored:?}, initial_tick=0, rules={rules:?}, step=0"
-                                );
-                                continue;
-                            }
-                            let base = Game::new(constructed.unwrap_or_else(|error| {
-                                panic!("scenario={authored:?}, initial_tick=0, rules={rules:?}, step=0: {error:?}")
-                            }), 0);
-                            for direction in [
-                                Direction::Up,
-                                Direction::Right,
-                                Direction::Down,
-                                Direction::Left,
-                            ] {
-                                let mut expected = authored.clone();
-                                expected.character.position =
-                                    reference_move(&authored, rules, direction);
-                                let expected_game = Game::new(expected.parse(rules).unwrap(), 1);
-                                let mut game = base.clone();
-                                let result = game.step(&[command(direction)]);
-                                assert_eq!(
-                                    result,
-                                    Ok(()),
-                                    "scenario={authored:?}, initial_tick=0, rules={rules:?}, direction={direction:?}, step=1"
-                                );
-                                assert_eq!(
-                                    game, expected_game,
-                                    "scenario={authored:?}, initial_tick=0, rules={rules:?}, direction={direction:?}, step=1"
-                                );
-                            }
+    fn off_centre_corridor_entries_make_safe_progress_within_fifteen_ticks() {
+        use Direction::*;
+        let rules = MovementRules::default();
+        // Downward entrance at y=768, with legal corridor centres x=608..=672.
+        // At contact, y=672 is 96 units before the mouth. Even a 128-unit
+        // correction plus 97 forward units fits in 15 ticks at 16 units/tick.
+        let entrance = rows("#####\n#...#\n#...#\n##.##\n#####", 640, 672);
+        for (quarter_turns, direction) in [(0, Down), (1, Left), (2, Up), (3, Right)] {
+            let rotate = |mut x, mut y| {
+                for _ in 0..quarter_turns {
+                    (x, y) = (1280 - y, x);
+                }
+                point(x, y)
+            };
+            let mut terrain = entrance.terrain.clone();
+            for _ in 0..quarter_turns {
+                terrain = (0..25)
+                    .map(|index| terrain[(4 - index % 5) * 5 + index / 5])
+                    .collect();
+            }
+            let mouth = rotate(640, 768);
+            let (dx, dy) = reference_direction_delta(direction);
+            for side in [-1, 1] {
+                for correction in 1..=128 {
+                    let start = rotate(640 + side * (32 + correction), 672);
+                    let authored =
+                        scenario(5, 5, terrain.clone(), start.x().value(), start.y().value());
+                    let mut game = Game::new(authored.clone().parse(rules).unwrap(), 0);
+                    let case = (direction, side, correction);
+                    let mut entered = false;
+                    for tick in 1..=15 {
+                        let before = game.character().position;
+                        game.step(&[command(direction)]).unwrap();
+                        let after = game.character().position;
+                        assert_eq!(game.tick(), tick, "case={case:?}");
+                        assert!(
+                            reference_legal(&authored, rules, after),
+                            "case={case:?}, tick={tick}"
+                        );
+                        let travel = before.x().value().abs_diff(after.x().value())
+                            + before.y().value().abs_diff(after.y().value());
+                        assert!(travel <= 16, "case={case:?}, tick={tick}, travel={travel}");
+
+                        // Check only the observed path: sideways, then commanded
+                        // forward travel. No oracle predicts the correction chosen.
+                        let (bend, sideways_direction) = if dx == 0 {
+                            (
+                                point(after.x().value(), before.y().value()),
+                                if after.x().value() < before.x().value() {
+                                    Left
+                                } else {
+                                    Right
+                                },
+                            )
+                        } else {
+                            (
+                                point(before.x().value(), after.y().value()),
+                                if after.y().value() < before.y().value() {
+                                    Up
+                                } else {
+                                    Down
+                                },
+                            )
+                        };
+                        let sideways = before.x().value().abs_diff(bend.x().value())
+                            + before.y().value().abs_diff(bend.y().value());
+                        let forward = (after.x().value() - bend.x().value()) * dx
+                            + (after.y().value() - bend.y().value()) * dy;
+                        assert!(forward >= 0, "case={case:?}, tick={tick}");
+                        assert_eq!(
+                            reference_cardinal(
+                                &authored,
+                                rules,
+                                before,
+                                sideways_direction,
+                                sideways
+                            ),
+                            bend,
+                            "unsafe correction: case={case:?}, tick={tick}"
+                        );
+                        assert_eq!(
+                            reference_cardinal(&authored, rules, bend, direction, forward as u32),
+                            after,
+                            "unsafe forward path: case={case:?}, tick={tick}"
+                        );
+                        if (after.x().value() - mouth.x().value()) * dx
+                            + (after.y().value() - mouth.y().value()) * dy
+                            > 0
+                        {
+                            entered = true;
+                            break;
                         }
                     }
+                    assert!(
+                        entered,
+                        "did not enter within 15 ticks: case={case:?}, position={:?}",
+                        game.character().position
+                    );
                 }
             }
         }
@@ -1323,7 +1716,10 @@ mod tests {
             MovementRules::new(128, 257).unwrap(),
             MovementRules::new(192, 512).unwrap(),
             MovementRules::new(254, 1024).unwrap(),
-        ] {
+        ]
+        .into_iter()
+        .flat_map(|rules| [rules.with_turn_assistance(false), rules])
+        {
             let initial_tick = 0;
             let mut game = Game::new(authored.clone().parse(rules).unwrap(), initial_tick);
             let mut replay = Game::new(authored.clone().parse(rules).unwrap(), initial_tick);

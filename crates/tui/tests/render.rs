@@ -34,22 +34,28 @@ fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
     assert_eq!(buffer[(6, 1)].symbol(), "@");
     assert_eq!(buffer[(7, 2)].symbol(), "█");
     assert_eq!(buffer[(7, 1)].symbol(), " ");
-    for (column, row) in [
-        (3, 1),
-        (5, 1),
-        (5, 3),
-        (1, 5),
-        (3, 5),
-        (7, 5),
-        (3, 7),
-        (5, 7),
-    ] {
+    for (column, row) in [(5, 3), (5, 7)] {
         assert_eq!(
             buffer[(5 + column, row)].symbol(),
             "▒",
             "cell=({column},{row})"
         );
     }
+    for (column, row) in [(3, 1), (5, 1), (1, 5), (3, 5), (7, 5), (3, 7)] {
+        assert_eq!(
+            buffer[(5 + column, row)].symbol(),
+            " ",
+            "cleared Cell=({column},{row})"
+        );
+    }
+    assert_eq!(
+        buffer
+            .content()
+            .iter()
+            .filter(|cell| cell.symbol() == "▒")
+            .count(),
+        2
+    );
     assert_eq!(screen(&terminal)[9], "Lives: 0 | Score: 0");
     assert_eq!(screen(&terminal)[10].trim(), "Offset: +000,+000");
     for y in 0..9 {
@@ -87,6 +93,27 @@ fn center_offset_tracks_movement_and_rebases_at_the_cell_boundary() {
     assert_eq!(screen(&terminal)[10].trim(), "Offset: +000,-128");
     assert_eq!(terminal.backend().buffer()[(6, 2)].symbol(), "@");
     assert_eq!(terminal.backend().buffer()[(6, 1)].symbol(), " ");
+}
+
+#[test]
+fn center_offset_shows_gradual_assistance_without_claiming_full_centering() {
+    let start = Instant::now();
+    let mut app = App::new(start, 19, 11);
+    app.handle_key(key(KeyCode::Down), start);
+    for tick in 1..=4 {
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    app.handle_key(key(KeyCode::Right), start + TICK_INTERVAL * 4);
+    for (tick, offset) in [
+        (5, "Offset: +016,+064"),
+        (6, "Offset: +032,+064"),
+        (7, "Offset: +032,+048"),
+        (8, "Offset: +032,+032"),
+        (9, "Offset: +048,+032"),
+    ] {
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+        assert_eq!(screen(&draw(&app, 19, 11))[10].trim(), offset);
+    }
 }
 
 #[test]

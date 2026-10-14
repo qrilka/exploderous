@@ -15,7 +15,7 @@ use crossterm::{
         self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
 };
-use exploderous_core::game::StepError;
+use exploderous_core::game::{MovementRules, StepError};
 use exploderous_tui::{App, render};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tracing::{error, info, trace};
@@ -42,8 +42,20 @@ fn init_tracing() -> io::Result<()> {
 }
 
 fn run() -> io::Result<()> {
+    let rules = match std::env::args_os().skip(1).collect::<Vec<_>>().as_slice() {
+        [] => MovementRules::default(),
+        [flag] if flag == "--strict-movement" => {
+            MovementRules::default().with_turn_assistance(false)
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "usage: exploderous-tui [--strict-movement]",
+            ));
+        }
+    };
     init_tracing()?;
-    info!(term = ?std::env::var_os("TERM"), "session started");
+    info!(term = ?std::env::var_os("TERM"), turn_assistance = rules.turn_assistance(), "session started");
     let mut session = match TerminalSession::enter() {
         Ok(session) => session,
         Err(error) => {
@@ -58,7 +70,7 @@ fn run() -> io::Result<()> {
         "terminal ready",
     );
 
-    let result = run_ui();
+    let result = run_ui(rules);
     if let Err(error) = &result {
         error!(%error, "application failed");
     }
@@ -75,11 +87,11 @@ fn run() -> io::Result<()> {
     }
 }
 
-fn run_ui() -> io::Result<()> {
+fn run_ui(rules: MovementRules) -> io::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let (width, height) = terminal::size()?;
     let started = Instant::now();
-    let mut app = App::new(started, width, height);
+    let mut app = App::new_with_rules(started, width, height, rules);
     trace_app_state(format_args!("start size={width}x{height}"), &app);
     let position = app.game().character().position;
     info!(
