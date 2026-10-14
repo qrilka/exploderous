@@ -2,7 +2,7 @@
 
 Agreed representation and behavioral contract for the headless core. See the [project plan](../project-plan.md), [glossary](../../GLOSSARY.md), and [representation ADR](../adr/0002-grid-terrain-and-positioned-objects.md).
 
-Characters use integer sub-cell positions and movement. Rust sketches below explain data relationships rather than complete declarations. Names such as `Cell`, `Tick`, and identity types denote distinct concepts. The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) defines the movement scale, defaults, limits, and validation/error contract. [Turn assistance](https://github.com/qrilka/exploderous/issues/5) deliberately revises its initial no-alignment rule as specified below; remaining choices are listed under [Open design decisions](#open-design-decisions).
+Characters use integer sub-cell positions and movement. Rust sketches below explain data relationships rather than complete declarations. Names such as `Cell`, `Tick`, and identity types denote distinct concepts. The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) defines the movement scale, defaults, limits, and validation/error contract. [Turn assistance](https://github.com/qrilka/exploderous/issues/5) deliberately revises its initial no-alignment rule and Cartesian verification matrix as specified below; remaining choices are listed under [Open design decisions](#open-design-decisions).
 
 ## Terrain grid
 
@@ -231,7 +231,8 @@ All methods exercise production construction and movement routines; there is no 
 | Coordinate conversions | Cell-boundary positions, negative/out-of-Arena positions, cell centres, and row-major access on non-square arenas |
 | Worked examples | Each direction, exact contact, off-centre corridor entry, inclusive actual-correction-limit boundaries, shared correction/forward budget, partial stopping, crossed obstacles, borders, blocked and free paths in assisted and strict modes |
 | Validation/error tests | Bad dimensions/lengths/positions/parameters, limits and arithmetic edges, duplicate identities/commands, and unchanged complete state on rejected frames |
-| Independent movement reference | On bounded scenarios in both modes, advance each candidate correction/forward path one world unit at a time using independent overlap geometry and compare the resulting position to production movement |
+| Corridor-entry progress | The bounded property below, exercised from both sides and rotated through all four directions, without predicting intermediate positions |
+| Independent movement reference | On small scripted sequences in both modes, advance each candidate correction/forward path one world unit at a time using independent overlap geometry and compare the resulting position to production movement |
 | Deterministic sequence tests | Check invariants throughout action sequences; capture initial state, parameters, inputs, and generator seed for reproduction |
 | Clone/continuation tests | Clone at intermediate ticks, apply identical suffixes and compare complete state; independently branch without sharing mutable state |
 | Kani | Scoped bounded proofs of collision/bounds safety, exact clear-path progress, and maximal legal stopping using actual routines |
@@ -240,6 +241,16 @@ All methods exercise production construction and movement routines; there is no 
 The reference must not share production collision helpers whose defect could make both algorithms agree incorrectly. Use hand-worked examples and properties as well: agreement between two implementations is not a complete specification.
 
 Safety alone is insufficient: a character that never moves stays out of walls. Require correct movement on clear paths and stopping without an unnecessary gap on blocked paths. Check that unrelated state is preserved while the tick and intended state advance.
+
+### Bounded corridor-entry property
+
+At the canonical 192-unit Footprint and 16-unit movement distance, author a clear one-Cell corridor reached from an open approach. Start at entrance contact, with the centre 96 units before the mouth and ordinary forward movement blocked by sideways placement. The entire correction route and the corridor ahead are unobstructed. For every required correction from 1 through 128 world units, from either side and in every commanded direction, repeated commands must carry the centre strictly past the mouth within 15 ticks. This is entry, not guaranteed centering or the whole Footprint clearing the entrance.
+
+The bound follows from the geometry: at most 128 correction units plus 97 forward units to cross the mouth is 225 units, requiring at most 15 canonical ticks, fewer than 256/16. Arbitrary approach distances, other parameters, and blocked routes are outside this particular progress bound and retain their separate worked checks.
+
+Check the complete Footprint along both observed path segments with independent overlap geometry and require total per-tick travel at most 16. Do not calculate expected intermediate positions by repeating assistance candidate selection. Enumerating the eligible corrections and rotations provides bounded evidence for this capability, not a proof for every arena and input sequence; unrelated parameter products are not the primary progress oracle.
+
+### Other verification scope
 
 Object-interaction properties include release of bomb capacity while a blast persists, expiry of one overlapping blast, hidden item/exit reveal, escaped-bomb re-entry, paths crossing live hazards, and death before victory.
 

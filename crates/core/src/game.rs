@@ -1544,77 +1544,104 @@ mod tests {
     }
 
     #[test]
-    fn exhaustive_two_by_two_terrain_matches_the_independent_unit_step_reference() {
-        for assignment in 0..81 {
-            let mut digits = assignment;
-            let terrain: Vec<_> = (0..4)
-                .map(|_| {
-                    let value = [Terrain::Floor, Terrain::Wall, Terrain::Block][digits % 3];
-                    digits /= 3;
-                    value
-                })
-                .collect();
-            for side in [2, 128, 192, 254] {
-                let r = (side / 2) as i32;
-                let mut coordinates = vec![
-                    r,
-                    128,
-                    256 - r,
-                    256 - r + 1,
-                    256,
-                    256 + r - 1,
-                    256 + r,
-                    384,
-                    512 - r,
-                ];
-                coordinates.sort_unstable();
-                coordinates.dedup();
-                for &x in &coordinates {
-                    for &y in &coordinates {
-                        let authored = scenario(2, 2, terrain.clone(), x, y);
-                        for (distance, assisted) in [1, 16, 255, 256, 257, 1024]
-                            .into_iter()
-                            .flat_map(|distance| [(distance, false), (distance, true)])
+    fn off_centre_corridor_entries_make_safe_progress_within_fifteen_ticks() {
+        use Direction::*;
+        let rules = MovementRules::default();
+        // Downward entrance at y=768, with legal corridor centres x=608..=672.
+        // At contact, y=672 is 96 units before the mouth. Even a 128-unit
+        // correction plus 97 forward units fits in 15 ticks at 16 units/tick.
+        let entrance = rows("#####\n#...#\n#...#\n##.##\n#####", 640, 672);
+        for (quarter_turns, direction) in [(0, Down), (1, Left), (2, Up), (3, Right)] {
+            let rotate = |mut x, mut y| {
+                for _ in 0..quarter_turns {
+                    (x, y) = (1280 - y, x);
+                }
+                point(x, y)
+            };
+            let mut terrain = entrance.terrain.clone();
+            for _ in 0..quarter_turns {
+                terrain = (0..25)
+                    .map(|index| terrain[(4 - index % 5) * 5 + index / 5])
+                    .collect();
+            }
+            let mouth = rotate(640, 768);
+            let (dx, dy) = reference_direction_delta(direction);
+            for side in [-1, 1] {
+                for correction in 1..=128 {
+                    let start = rotate(640 + side * (32 + correction), 672);
+                    let authored =
+                        scenario(5, 5, terrain.clone(), start.x().value(), start.y().value());
+                    let mut game = Game::new(authored.clone().parse(rules).unwrap(), 0);
+                    let case = (direction, side, correction);
+                    let mut entered = false;
+                    for tick in 1..=15 {
+                        let before = game.character().position;
+                        game.step(&[command(direction)]).unwrap();
+                        let after = game.character().position;
+                        assert_eq!(game.tick(), tick, "case={case:?}");
+                        assert!(
+                            reference_legal(&authored, rules, after),
+                            "case={case:?}, tick={tick}"
+                        );
+                        let travel = before.x().value().abs_diff(after.x().value())
+                            + before.y().value().abs_diff(after.y().value());
+                        assert!(travel <= 16, "case={case:?}, tick={tick}, travel={travel}");
+
+                        // Check only the observed path: sideways, then commanded
+                        // forward travel. No oracle predicts the correction chosen.
+                        let (bend, sideways_direction) = if dx == 0 {
+                            (
+                                point(after.x().value(), before.y().value()),
+                                if after.x().value() < before.x().value() {
+                                    Left
+                                } else {
+                                    Right
+                                },
+                            )
+                        } else {
+                            (
+                                point(before.x().value(), after.y().value()),
+                                if after.y().value() < before.y().value() {
+                                    Up
+                                } else {
+                                    Down
+                                },
+                            )
+                        };
+                        let sideways = before.x().value().abs_diff(bend.x().value())
+                            + before.y().value().abs_diff(bend.y().value());
+                        let forward = (after.x().value() - bend.x().value()) * dx
+                            + (after.y().value() - bend.y().value()) * dy;
+                        assert!(forward >= 0, "case={case:?}, tick={tick}");
+                        assert_eq!(
+                            reference_cardinal(
+                                &authored,
+                                rules,
+                                before,
+                                sideways_direction,
+                                sideways
+                            ),
+                            bend,
+                            "unsafe correction: case={case:?}, tick={tick}"
+                        );
+                        assert_eq!(
+                            reference_cardinal(&authored, rules, bend, direction, forward as u32),
+                            after,
+                            "unsafe forward path: case={case:?}, tick={tick}"
+                        );
+                        if (after.x().value() - mouth.x().value()) * dx
+                            + (after.y().value() - mouth.y().value()) * dy
+                            > 0
                         {
-                            let rules = MovementRules::new(side, distance)
-                                .unwrap()
-                                .with_turn_assistance(assisted);
-                            let constructed = authored.clone().parse(rules);
-                            if !reference_legal(&authored, rules, authored.character.position) {
-                                assert_eq!(
-                                    constructed,
-                                    Err(ConstructionError::InvalidStartingPosition),
-                                    "scenario={authored:?}, initial_tick=0, rules={rules:?}, step=0"
-                                );
-                                continue;
-                            }
-                            let base = Game::new(constructed.unwrap_or_else(|error| {
-                                panic!("scenario={authored:?}, initial_tick=0, rules={rules:?}, step=0: {error:?}")
-                            }), 0);
-                            for direction in [
-                                Direction::Up,
-                                Direction::Right,
-                                Direction::Down,
-                                Direction::Left,
-                            ] {
-                                let mut expected = authored.clone();
-                                expected.character.position =
-                                    reference_move(&authored, rules, direction);
-                                let expected_game = Game::new(expected.parse(rules).unwrap(), 1);
-                                let mut game = base.clone();
-                                let result = game.step(&[command(direction)]);
-                                assert_eq!(
-                                    result,
-                                    Ok(()),
-                                    "scenario={authored:?}, initial_tick=0, rules={rules:?}, direction={direction:?}, step=1"
-                                );
-                                assert_eq!(
-                                    game, expected_game,
-                                    "scenario={authored:?}, initial_tick=0, rules={rules:?}, direction={direction:?}, step=1"
-                                );
-                            }
+                            entered = true;
+                            break;
                         }
                     }
+                    assert!(
+                        entered,
+                        "did not enter within 15 ticks: case={case:?}, position={:?}",
+                        game.character().position
+                    );
                 }
             }
         }
