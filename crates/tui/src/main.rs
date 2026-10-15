@@ -15,7 +15,7 @@ use crossterm::{
         self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
 };
-use exploderous_core::game::{MovementRules, StepError};
+use exploderous_core::game::{GameRules, StepError};
 use exploderous_tui::{App, render};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tracing::{error, info, trace};
@@ -43,10 +43,8 @@ fn init_tracing() -> io::Result<()> {
 
 fn run() -> io::Result<()> {
     let rules = match std::env::args_os().skip(1).collect::<Vec<_>>().as_slice() {
-        [] => MovementRules::default(),
-        [flag] if flag == "--strict-movement" => {
-            MovementRules::default().with_turn_assistance(false)
-        }
+        [] => GameRules::default(),
+        [flag] if flag == "--strict-movement" => GameRules::default().with_turn_assistance(false),
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -87,7 +85,7 @@ fn run() -> io::Result<()> {
     }
 }
 
-fn run_ui(rules: MovementRules) -> io::Result<()> {
+fn run_ui(rules: GameRules) -> io::Result<()> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let (width, height) = terminal::size()?;
     let started = Instant::now();
@@ -131,6 +129,7 @@ fn run_ui(rules: MovementRules) -> io::Result<()> {
             trace!(
                 tick = tick.tick,
                 direction = ?tick.direction,
+                place_bomb = tick.place_bomb,
                 position_x = tick.position.x().value(),
                 position_y = tick.position.y().value(),
                 "game tick",
@@ -191,7 +190,7 @@ fn trace_app_state(message: impl std::fmt::Display, app: &App) {
 }
 
 fn step_error(error: StepError) -> io::Error {
-    io::Error::other(format!("movement simulation stopped: {error:?}"))
+    io::Error::other(format!("game simulation stopped: {error:?}"))
 }
 
 struct TerminalSession {

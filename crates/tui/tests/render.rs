@@ -34,14 +34,14 @@ fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
     assert_eq!(buffer[(6, 1)].symbol(), "@");
     assert_eq!(buffer[(7, 2)].symbol(), "█");
     assert_eq!(buffer[(7, 1)].symbol(), " ");
-    for (column, row) in [(5, 3), (5, 7)] {
+    for (column, row) in [(3, 3), (5, 3), (7, 3), (3, 5), (7, 5), (5, 7)] {
         assert_eq!(
             buffer[(5 + column, row)].symbol(),
             "▒",
             "cell=({column},{row})"
         );
     }
-    for (column, row) in [(3, 1), (5, 1), (1, 5), (3, 5), (7, 5), (3, 7)] {
+    for (column, row) in [(3, 1), (5, 1), (1, 5), (5, 5), (3, 7)] {
         assert_eq!(
             buffer[(5 + column, row)].symbol(),
             " ",
@@ -54,7 +54,7 @@ fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
             .iter()
             .filter(|cell| cell.symbol() == "▒")
             .count(),
-        2
+        6
     );
     assert_eq!(screen(&terminal)[9], "Lives: 0 | Score: 0");
     assert_eq!(screen(&terminal)[10].trim(), "Offset: +000,+000");
@@ -63,6 +63,88 @@ fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
             assert_eq!(UnicodeWidthStr::width(buffer[(x, y)].symbol()), 1);
         }
     }
+}
+
+#[test]
+fn blast_origins_and_both_arm_directions_use_live_glyphs_without_hiding_walls() {
+    let start = Instant::now();
+    let mut app = App::new(start, 19, 11);
+    app.handle_key(key(KeyCode::Char(' ')), start);
+    app.handle_key(key(KeyCode::Right), start);
+    for tick in 1..=32 {
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    app.handle_key(
+        KeyEvent::new_with_kind(KeyCode::Right, KeyModifiers::NONE, KeyEventKind::Release),
+        start + TICK_INTERVAL * 32,
+    );
+    for tick in 33..=121 {
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    let terminal = draw(&app, 19, 11);
+    let buffer = terminal.backend().buffer();
+    for ((x, y), glyph) in [
+        ((6, 1), "┼"),
+        ((7, 1), "─"),
+        ((6, 2), "│"),
+        ((6, 0), "█"),
+        ((5, 1), "█"),
+        ((8, 1), "@"),
+    ] {
+        assert_eq!(buffer[(x, y)].symbol(), glyph);
+    }
+}
+
+#[test]
+fn a_bomb_clears_a_passage_and_its_blast_covers_the_destroyed_block() {
+    let start = Instant::now();
+    let mut app = App::new(start, 19, 11);
+    let mut tick = 0;
+    // Reach (2,3), next to the new Block at (3,3), through ordinary input.
+    for (code, count) in [(KeyCode::Down, 32), (KeyCode::Right, 16)] {
+        app.handle_key(key(code), start + TICK_INTERVAL * tick);
+        for _ in 0..count {
+            tick += 1;
+            app.advance(start + TICK_INTERVAL * tick).unwrap();
+        }
+        app.handle_key(
+            KeyEvent::new_with_kind(code, KeyModifiers::NONE, KeyEventKind::Release),
+            start + TICK_INTERVAL * tick,
+        );
+    }
+    app.handle_key(key(KeyCode::Char(' ')), start + TICK_INTERVAL * tick);
+    app.handle_key(key(KeyCode::Left), start + TICK_INTERVAL * tick);
+    for _ in 0..16 {
+        tick += 1;
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    app.handle_key(
+        KeyEvent::new_with_kind(KeyCode::Left, KeyModifiers::NONE, KeyEventKind::Release),
+        start + TICK_INTERVAL * tick,
+    );
+    let terminal = draw(&app, 19, 11);
+    assert_eq!(terminal.backend().buffer()[(7, 3)].symbol(), "●");
+    assert_eq!(terminal.backend().buffer()[(8, 3)].symbol(), "▒");
+    while tick < 169 {
+        tick += 1;
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    let terminal = draw(&app, 19, 11);
+    assert_eq!(terminal.backend().buffer()[(7, 3)].symbol(), "┼");
+    assert_eq!(terminal.backend().buffer()[(8, 3)].symbol(), "─");
+    assert_eq!(terminal.backend().buffer()[(7, 2)].symbol(), "█");
+    while tick < 199 {
+        tick += 1;
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    let terminal = draw(&app, 19, 11);
+    assert_eq!(terminal.backend().buffer()[(7, 3)].symbol(), " ");
+    assert_eq!(terminal.backend().buffer()[(8, 3)].symbol(), " ");
+    app.handle_key(key(KeyCode::Char('r')), start + TICK_INTERVAL * tick);
+    assert_eq!(
+        screen(&draw(&app, 19, 11)),
+        screen(&draw(&App::new(start, 19, 11), 19, 11))
+    );
 }
 
 #[test]
@@ -125,6 +207,8 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
     let text = screen(&terminal).join("\n");
     for entry in [
         "Arrow keys: move",
+        "Space: place one Bomb; place another after it detonates",
+        "Blasts clear Blocks but are not lethal in this slice",
         "R: reset; Q or Escape: quit",
         "(blank space) Floor",
         "█ Wall",
@@ -142,6 +226,17 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "◈ Blast-reach Item",
     ] {
         assert!(text.contains(entry), "missing {entry:?} in:\n{text}");
+    }
+
+    let (live, reserved) = text.split_once("Reserved glyphs").unwrap();
+    for entry in [
+        "● Bomb",
+        "┼ Blast centre",
+        "│ Blast north/south arms",
+        "─ Blast east/west arms",
+    ] {
+        assert!(live.contains(entry));
+        assert!(!reserved.contains(entry));
     }
 
     let mut narrow = App::new(now, 19, 11);
