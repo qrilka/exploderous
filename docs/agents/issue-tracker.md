@@ -10,9 +10,14 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - Keep lasting behavior and invariants in the design, and consequential decision rationale in ADRs. If a spec or ticket changes a lasting rule, update the owning design (and ADR if warranted) before treating the issue as ready. Do not duplicate full design text in issue bodies; link to it and state only the slice-specific requirements.
 - The issue tracker is the source of truth for issue scope, acceptance gates, dependencies, and status. Reflect durable changes in the plan only when project direction or priority changes—not to mirror ticket progress.
 
+## Preparation and readiness
+
+- Feature-wide design/ADR updates produced during specification or ticket preparation are shared prerequisites, not implementation of the first child ticket. Land approved updates before publishing dependent tickets as `ready-for-agent`. With explicit user approval, commit and push this preparation directly to `main`; a separate preparation branch is not required.
+- Before applying `ready-for-agent`, verify that a fresh session can obtain the required specifications, decisions, and repository prerequisites from published sources. Local-only changes do not satisfy readiness. Represent unfinished implementation prerequisites with explicit blocking dependencies.
+
 ## Ticket branches
 
-- Before changing files for a ticket, create or reuse its dedicated `issue-<number>-<short-slug>` branch, such as `issue-1-headless-movement`, unless the user specifies another branch.
+- When beginning implementation of a ticket, create or reuse its dedicated `issue-<number>-<short-slug>` branch before changing its files, such as `issue-1-headless-movement`, unless the user specifies another branch. Publishing tickets or preparing their shared design is not the start of child-ticket implementation.
 - Before implementing, reviewing, or editing a ticket, resolve the target from the explicitly named issue or, if none is named, the active ticket branch; then read its live body and comments. Apply “this ticket” changes to that target and keep follow-ups separate unless named. If branch, issue, and requested scope disagree, clarify before editing.
 - If authorization or issue state is disputed, compare the session log with GitHub's current state before changing, closing, or recreating an issue. Ask if those records do not resolve the scope or authorization.
 - When the user approves behavior that differs from acceptance criteria, update the issue before treating the work as ready for review; record user-confirmed manual acceptance gates in an issue comment.
