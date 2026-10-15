@@ -1,6 +1,14 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations. The project plan records direction and broad priorities; it is not a source of slice requirements or issue status.
+
+## Specs and implementation tickets
+
+- A **spec issue** describes a feature or milestone: desired outcome, scope and non-goals, cross-cutting requirements, unresolved decisions, and feature-level acceptance gates. Create or refine it from the project direction before splitting multi-slice work.
+- An **implementation ticket** describes one implementable slice, with its own scope, acceptance checks, relevant design/spec links, and blocking dependencies. Make it self-contained enough to implement without copying the whole spec into it.
+- Small work can use one issue as both its spec and implementation ticket. For multi-slice work, use a parent spec issue with child implementation tickets. Link children as GitHub sub-issues where available; otherwise use a task list and a `Part of #<spec>` line. Represent blockers with native issue dependencies when available.
+- Keep lasting behavior and invariants in the design, and consequential decision rationale in ADRs. If a spec or ticket changes a lasting rule, update the owning design (and ADR if warranted) before treating the issue as ready. Do not duplicate full design text in issue bodies; link to it and state only the slice-specific requirements.
+- The issue tracker is the source of truth for issue scope, acceptance gates, dependencies, and status. Reflect durable changes in the plan only when project direction or priority changes—not to mirror ticket progress.
 
 ## Ticket branches
 

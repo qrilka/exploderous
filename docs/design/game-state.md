@@ -264,4 +264,4 @@ Object-interaction properties include release of bomb capacity while a blast per
 - AI: decision ordering and random-consumption conventions.
 - Objectives and items: additional completion conditions, power-up catalog/effects, item destruction/reveal behavior, multiple-item policies, and pickup conflicts.
 
-The representation accommodates these choices without silently defining them. Gameplay dimensions, timing, and body size remain explicit parameters where tuning is needed; terminal display and unchecked integer types are not their source of truth. Delivery scope and verification-tool rollout belong in the [project plan](../project-plan.md).
+The representation accommodates these choices without silently defining them. Gameplay dimensions, timing, and body size remain explicit parameters where tuning is needed; terminal display and unchecked integer types are not their source of truth. Delivery scope and verification-tool rollout belong in the relevant [GitHub spec issue or implementation ticket](../agents/issue-tracker.md); the [project plan](../project-plan.md) records broad direction and priorities.

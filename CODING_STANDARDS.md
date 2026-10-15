@@ -20,10 +20,15 @@ Before editing, choose the owning document using this table. During review, chec
 | --- | --- |
 | README | Repository overview, minimal quickstart, and links to detailed documentation |
 | Glossary | Domain terms and their meanings, without implementation details |
+| Project plan | Project direction, broad priorities, and delivery sequencing; not slice requirements or per-issue status tracking |
+| Spec issue | Desired outcome, scope, cross-cutting requirements, open decisions, and feature-level acceptance gates |
+| Implementation ticket | One implementable slice, its local acceptance checks, and dependencies; it may also serve as the spec for small work |
+| Design | Current representation, relationships, invariants, interfaces, interaction semantics, and open design questions |
 | ADR | Why a consequential decision was made, including alternatives and trade-offs |
-| Design | Representation, relationships, invariants, interfaces, interaction semantics, and open design questions |
-| Plan, slice spec, or ticket | Delivery sequence, implementation scope, tooling setup, and acceptance gates |
+| Coding standards | Policies for code and documentation quality and review |
 
-Flag content that belongs to another document's responsibility. In particular, a design should remain useful after a delivery slice is complete; next-slice instructions belong in the plan or spec. Testing implications and correctness properties belong in the design, while tool rollout and execution gates belong in the plan or spec.
+Specs and tickets live in GitHub issues; see `docs/agents/issue-tracker.md` for their lifecycle and linking conventions. Keep the project plan a concise roadmap that points to issues and durable design documents instead of copying their detailed requirements. Do not maintain per-issue status in the plan.
 
-Flag conflicting or duplicated requirements across documents, and identify which source should own them. Design sketches should distinguish agreed relationships from illustrative types or unsettled numeric choices.
+Flag content that belongs to another document's responsibility. A design should remain useful after a delivery slice is complete; next-slice instructions belong in the project plan or issue. Testing implications and correctness properties belong in the design, while feature acceptance gates and tool rollout belong in the spec issue or implementation ticket.
+
+When sources conflict, do not silently let a narrower delivery issue redefine a lasting design rule. Update the design to change the current contract, and record the rationale in an ADR when the choice is consequential; then align the spec/ticket. The plan guides prioritization but does not override any of these contracts. Flag conflicting or duplicated requirements and identify which source should own them. Design sketches should distinguish agreed relationships from illustrative types or unsettled numeric choices.
