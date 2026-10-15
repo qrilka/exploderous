@@ -89,7 +89,7 @@ Movement:
 
 ### Turn assistance
 
-`MovementRules` selects assisted or strict movement before Scenario construction and remains fixed for the Game's lifetime. Assistance is enabled by default; strict mode uses only ordinary cardinal movement. The canonical Footprint remains 192 world units and movement distance remains 16. At the 256-unit Cell scale, that Footprint allows centre offsets of ±32 in a one-Cell corridor.
+`GameRules` holds movement and bomb parameters together, selects assisted or strict movement before Scenario construction, and remains fixed for the Game's lifetime. Assistance is enabled by default; strict mode uses only ordinary cardinal movement. The canonical Footprint remains 192 world units and movement distance remains 16. At the 256-unit Cell scale, that Footprint allows centre offsets of ±32 in a one-Cell corridor.
 
 For each commanded tick:
 
@@ -125,6 +125,8 @@ struct BombEscapePermission {
     bomb: BombId,
 }
 ```
+
+The records above illustrate the fuller identity-based model. For the current single-character, capacity-one implementation, the Game instead stores one optional Bomb with its escape-permission flag attached. Removing the Bomb removes its permission; no separate Bomb identity allocator or permission collection is needed. Revisit this representation when multiple live Bombs or characters are introduced.
 
 Bombs are cell-anchored. Placement selects the cell containing the character's centre and does not move or snap the character. A live bomb occupies its cell for movement collision. Ownership lets capacity be enforced per character; capacity counts undetonated bombs, not lingering blasts.
 
@@ -232,7 +234,7 @@ Keep mutable storage private. Scenario data may be authored externally, but only
 
 Validate dimensions, cell-count arithmetic/storage length, coordinate ranges and footprint placement, rule parameters, unique identities and references, and explicit resource ceilings. Kind-specific relationships are part of the validation contract. Invalid input must be reported, not turned into indexing panics or silently wrapped arithmetic. Initial movement ceilings are defined in the movement spec; limits for later objects remain open. The Kani harness's smaller bounds are not the game's maximum size.
 
-One frame contains at most one movement direction and, when supported, a placement request for each addressed character. Missing human input means no action; an empty valid frame still advances time unless the tick counter is exhausted. The movement spec defines atomic rejection at that numeric limit. Externally submitted commands target human-controlled characters. NPC decisions run within the deterministic simulation using explicit AI/random state.
+A `CharacterCommand` carries a character identity, optional movement direction, and a bomb-placement flag together. One frame contains at most one such command per addressed character. Missing human input means no action; an empty valid frame still advances time unless the tick counter is exhausted. The movement spec defines atomic rejection at that numeric limit. Externally submitted commands target human-controlled characters. NPC decisions run within the deterministic simulation using explicit AI/random state.
 
 Reject duplicate commands, unknown identities, and external commands targeting NPCs before any tick, AI, or random-state advancement. A valid blocked action is ordinary gameplay: movement may stop partway, a failed placement has no placement effect, and time still advances. Input enumeration order must not affect results. Processing order and random consumption must be explicit rather than accidental collection order.
 

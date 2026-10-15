@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use exploderous_core::game::{
-    CellCoord, Character, CharacterId, Column, Direction, Game, MovementCommand, MovementRules,
+    CellCoord, Character, CharacterCommand, CharacterId, Column, Direction, Game, GameRules,
     Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
 };
 use ratatui::{
@@ -19,10 +19,12 @@ pub const MIN_HEIGHT: u16 = 11;
 const MAX_CATCH_UP_TICKS: usize = 5;
 const MAP_SIZE: u16 = 9;
 const STATUS: &str = "Lives: 0 | Score: 0";
-const HELP: &str = r#"MOVEMENT PLAYGROUND
+const HELP: &str = r#"BOMB PLAYGROUND
 
 Controls
 Arrow keys: move; latest press wins; release falls back
+Space: place one Bomb; place another after it detonates
+Blasts clear Blocks but are not lethal in this slice
 R: reset; Q or Escape: quit
 ?, h, or H: open or close help
 Up/Down: scroll; Escape closes help
@@ -33,14 +35,14 @@ Live map
 █ Wall
 ▒ Block
 @ Player
-
-Reserved glyphs
-a AI-controlled non-Enemy Character
-e Enemy Character (takes precedence over AI)
 ● Bomb
 ┼ Blast centre
 │ Blast north/south arms
 ─ Blast east/west arms
+
+Reserved glyphs
+a AI-controlled non-Enemy Character
+e Enemy Character (takes precedence over AI)
 ⬚ Exit
 ▣ Bomb-capacity Item
 ◈ Blast-reach Item"#;
@@ -49,6 +51,7 @@ e Enemy Character (takes precedence over AI)
 pub struct TickRecord {
     pub tick: u64,
     pub direction: Option<Direction>,
+    pub place_bomb: bool,
     pub position: Position,
 }
 
@@ -61,6 +64,7 @@ pub struct AdvanceReport {
 pub struct App {
     game: Game,
     held: Vec<Direction>,
+    placement_pending: bool,
     focused: bool,
     width: u16,
     height: u16,
@@ -72,13 +76,14 @@ pub struct App {
 
 impl App {
     pub fn new(now: Instant, width: u16, height: u16) -> Self {
-        Self::new_with_rules(now, width, height, MovementRules::default())
+        Self::new_with_rules(now, width, height, GameRules::default())
     }
 
-    pub fn new_with_rules(now: Instant, width: u16, height: u16, rules: MovementRules) -> Self {
+    pub fn new_with_rules(now: Instant, width: u16, height: u16, rules: GameRules) -> Self {
         let mut app = Self {
             game: new_game(rules),
             held: Vec::new(),
+            placement_pending: false,
             focused: true,
             width,
             height,
@@ -112,7 +117,13 @@ impl App {
         }
 
         match (event.code, event.kind) {
-            (KeyCode::Char('q' | 'Q') | KeyCode::Esc, KeyEventKind::Press) => self.quit = true,
+            (KeyCode::Char('q' | 'Q') | KeyCode::Esc, KeyEventKind::Press) => {
+                self.quit = true;
+                self.reconcile_clock(now);
+            }
+            (KeyCode::Char(' '), KeyEventKind::Press) if !self.paused() => {
+                self.placement_pending = true;
+            }
             (KeyCode::Char('r' | 'R'), KeyEventKind::Press) => self.reset(now),
             (KeyCode::Char('?'), KeyEventKind::Press)
             | (KeyCode::Char('h' | 'H'), KeyEventKind::Press) => self.toggle_help(now),
@@ -164,19 +175,20 @@ impl App {
         let overdue = elapsed.as_nanos() / TICK_INTERVAL.as_nanos() + 1;
         let tick_count = overdue.min(MAX_CATCH_UP_TICKS as u128) as usize;
         let direction = self.held_direction();
-        let frame: Vec<_> = direction
-            .map(|direction| MovementCommand {
-                character: self.game.character().id,
-                direction,
-            })
-            .into_iter()
-            .collect();
         let mut ticks = Vec::with_capacity(tick_count);
         for _ in 0..tick_count {
-            self.game.step(&frame)?;
+            let place_bomb = self.placement_pending;
+            let command = CharacterCommand {
+                character: self.game.character().id,
+                movement: direction,
+                place_bomb,
+            };
+            self.game.step(&[command])?;
+            self.placement_pending = false;
             ticks.push(TickRecord {
                 tick: self.game.tick(),
                 direction,
+                place_bomb,
                 position: self.game.character().position,
             });
         }
@@ -219,13 +231,14 @@ impl App {
     }
 
     fn paused(&self) -> bool {
-        !self.can_move() || self.help_open
+        self.quit || !self.can_move() || self.help_open
     }
 
     fn reconcile_clock(&mut self, now: Instant) {
         if self.paused() {
             self.next_tick = None;
             self.held.clear();
+            self.placement_pending = false;
         } else if self.next_tick.is_none() {
             self.next_tick = Some(now + TICK_INTERVAL);
         }
@@ -234,6 +247,7 @@ impl App {
     fn reset(&mut self, now: Instant) {
         self.game = new_game(*self.game.rules());
         self.held.clear();
+        self.placement_pending = false;
         self.next_tick = None;
         self.reconcile_clock(now);
     }
@@ -241,6 +255,7 @@ impl App {
     fn toggle_help(&mut self, now: Instant) {
         self.help_open = !self.help_open;
         self.held.clear();
+        self.placement_pending = false;
         if self.help_open {
             self.help_scroll = 0;
         }
@@ -277,9 +292,13 @@ fn direction(code: KeyCode) -> Option<Direction> {
     }
 }
 
-fn new_game(rules: MovementRules) -> Game {
+fn new_game(rules: GameRules) -> Game {
     let blocks = [
+        CellCoord::new(Column::new(3), Row::new(3)),
         CellCoord::new(Column::new(5), Row::new(3)),
+        CellCoord::new(Column::new(7), Row::new(3)),
+        CellCoord::new(Column::new(3), Row::new(5)),
+        CellCoord::new(Column::new(7), Row::new(5)),
         CellCoord::new(Column::new(5), Row::new(7)),
     ];
     let terrain = (0..9_u32)
@@ -312,7 +331,7 @@ fn new_game(rules: MovementRules) -> Game {
         },
         rules,
     )
-    .expect("the fixed movement arena is valid");
+    .expect("the fixed playground arena is valid");
     Game::new(scenario, 0)
 }
 
@@ -354,7 +373,27 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
             '@'
         } else {
             match terrain {
-                Terrain::Floor => ' ',
+                Terrain::Floor => {
+                    if app.game.bomb().is_some_and(|bomb| bomb.cell() == cell) {
+                        '●'
+                    } else if let Some(blast) = app
+                        .game
+                        .blasts()
+                        .iter()
+                        .rev()
+                        .find(|blast| blast.cells().contains(&cell))
+                    {
+                        if cell == blast.origin() {
+                            '┼'
+                        } else if cell.row() == blast.origin().row() {
+                            '─'
+                        } else {
+                            '│'
+                        }
+                    } else {
+                        ' '
+                    }
+                }
                 Terrain::Wall => '█',
                 Terrain::Block => '▒',
             }

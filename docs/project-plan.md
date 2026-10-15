@@ -10,7 +10,7 @@ For gameplay vocabulary, see [GLOSSARY.md](../GLOSSARY.md). The [simulation ADR]
 
 ## Current state
 
-The project has a headless Rust core with deterministic movement and collision, plus a TUI movement playground. It is not yet a complete playable Normal level: bomb mechanics and the level objective remain future work.
+The headless core and TUI support deterministic movement and collision, Bomb placement, and lingering Blasts that clear Blocks. It is not yet a complete playable Normal level: lethal hazards and the Exit objective remain future work.
 
 ## Roadmap
 

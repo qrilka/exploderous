@@ -1,4 +1,4 @@
-//! Deterministic grid movement, scenario validation, and game-state types.
+//! Deterministic movement, Bomb/Blast simulation, and validated game state.
 
 use std::collections::BTreeSet;
 
@@ -143,13 +143,13 @@ pub struct Character {
     pub position: Position,
 }
 
-/// Validated starting arena and character placement, bound to its movement rules.
+/// Validated starting arena and character placement, bound to its game rules.
 /// A scenario defines no simulation time; that belongs to the game.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scenario {
     arena: Arena,
     character: Character,
-    rules: MovementRules,
+    rules: GameRules,
 }
 
 impl Scenario {
@@ -160,7 +160,7 @@ impl Scenario {
         height: u32,
         terrain: Vec<Terrain>,
         character: Character,
-        rules: MovementRules,
+        rules: GameRules,
     ) -> Result<Self, ConstructionError> {
         let arena = Arena::new(width, height, terrain)?;
         let footprint = Rect::footprint(character.position, rules);
@@ -180,18 +180,23 @@ impl Scenario {
     }
 }
 
-/// Validated rules, fixed for a game's lifetime. Distances are integer world units.
+/// Validated rules, fixed for a game's lifetime. Movement uses integer world units;
+/// Bomb durations use simulation ticks and Blast reach counts Cells beyond the origin.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MovementRules {
+pub struct GameRules {
     footprint_side: u32,
     movement_distance: u32,
     turn_assistance: bool,
+    bomb_fuse_ticks: u64,
+    blast_reach: u32,
+    blast_lifetime_ticks: u64,
 }
 
-impl MovementRules {
+impl GameRules {
     /// Parse an even footprint side in 2..=254 and a movement distance in 1..=1024.
     /// Turn assistance is enabled; use `with_turn_assistance(false)` for strict movement.
-    /// If both are invalid, the footprint error takes priority.
+    /// Bomb parameters default to a 120-tick fuse, one-Cell reach, and 30-tick lifetime.
+    /// If both movement parameters are invalid, the footprint error takes priority.
     pub fn new(footprint_side: u32, movement_distance: u32) -> Result<Self, ConstructionError> {
         if !(2..=254).contains(&footprint_side) || !footprint_side.is_multiple_of(2) {
             return Err(ConstructionError::InvalidFootprintSide);
@@ -203,7 +208,45 @@ impl MovementRules {
             footprint_side,
             movement_distance,
             turn_assistance: true,
+            bomb_fuse_ticks: 120,
+            blast_reach: 1,
+            blast_lifetime_ticks: 30,
         })
+    }
+
+    /// Tune Bomb parameters before Scenario construction. All three must be positive.
+    /// Rejection priority is fuse, reach, then lifetime; deadlines are checked on stepping.
+    pub fn with_bomb_parameters(
+        mut self,
+        fuse_ticks: u64,
+        reach: u32,
+        lifetime_ticks: u64,
+    ) -> Result<Self, ConstructionError> {
+        if fuse_ticks == 0 {
+            return Err(ConstructionError::InvalidBombFuse);
+        }
+        if reach == 0 {
+            return Err(ConstructionError::InvalidBlastReach);
+        }
+        if lifetime_ticks == 0 {
+            return Err(ConstructionError::InvalidBlastLifetime);
+        }
+        self.bomb_fuse_ticks = fuse_ticks;
+        self.blast_reach = reach;
+        self.blast_lifetime_ticks = lifetime_ticks;
+        Ok(self)
+    }
+
+    pub fn bomb_fuse_ticks(&self) -> u64 {
+        self.bomb_fuse_ticks
+    }
+
+    pub fn blast_reach(&self) -> u32 {
+        self.blast_reach
+    }
+
+    pub fn blast_lifetime_ticks(&self) -> u64 {
+        self.blast_lifetime_ticks
     }
 
     pub fn footprint_side(&self) -> u32 {
@@ -225,9 +268,9 @@ impl MovementRules {
     }
 }
 
-impl Default for MovementRules {
+impl Default for GameRules {
     fn default() -> Self {
-        Self::new(192, 16).expect("default movement rules are valid")
+        Self::new(192, 16).expect("default game rules are valid")
     }
 }
 
@@ -238,6 +281,9 @@ pub enum ConstructionError {
     InvalidFootprintSide,
     InvalidMovementDistance,
     InvalidStartingPosition,
+    InvalidBombFuse,
+    InvalidBlastReach,
+    InvalidBlastLifetime,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,11 +294,51 @@ pub enum Direction {
     Left,
 }
 
-/// One cardinal command for one tick. Omission means no movement.
+/// One Character's actions for one tick. Omitted actions are not remembered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MovementCommand {
+pub struct CharacterCommand {
     pub character: CharacterId,
-    pub direction: Direction,
+    pub movement: Option<Direction>,
+    pub place_bomb: bool,
+}
+
+/// The single live Bomb; its permission belongs to this Bomb, not a later one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bomb {
+    cell: CellCoord,
+    detonate_at: u64,
+    escape_allowed: bool,
+}
+
+impl Bomb {
+    pub fn cell(&self) -> CellCoord {
+        self.cell
+    }
+
+    pub fn detonate_at(&self) -> u64 {
+        self.detonate_at
+    }
+}
+
+/// One fixed, nonempty coverage set with an independent expiry deadline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Blast {
+    cells: Vec<CellCoord>,
+    expires_at: u64,
+}
+
+impl Blast {
+    pub fn origin(&self) -> CellCoord {
+        self.cells[0]
+    }
+
+    pub fn cells(&self) -> &[CellCoord] {
+        &self.cells
+    }
+
+    pub fn expires_at(&self) -> u64 {
+        self.expires_at
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -338,6 +424,39 @@ impl Arena {
             })
     }
 
+    fn neighbor(&self, cell: CellCoord, direction: Direction) -> Option<CellCoord> {
+        let (column, row) = (cell.column().value(), cell.row().value());
+        let (column, row) = match direction {
+            Direction::Up => (column, row.checked_sub(1)?),
+            Direction::Right => (column.checked_add(1)?, row),
+            Direction::Down => (column, row.checked_add(1)?),
+            Direction::Left => (column.checked_sub(1)?, row),
+        };
+        let next = CellCoord::new(Column::new(column), Row::new(row));
+        self.cell_index(next).map(|_| next)
+    }
+
+    fn cell_bounds(&self, cell: CellCoord) -> Rect {
+        let origin = self
+            .cell_origin(cell)
+            .expect("Cell bounds requested within Arena");
+        let left = i64::from(origin.x().value());
+        let top = i64::from(origin.y().value());
+        Rect {
+            left,
+            top,
+            right: left + i64::from(WORLD_UNITS_PER_CELL),
+            bottom: top + i64::from(WORLD_UNITS_PER_CELL),
+        }
+    }
+
+    fn set_terrain(&mut self, cell: CellCoord, terrain: Terrain) {
+        let index = self
+            .cell_index(cell)
+            .expect("changed terrain Cell is in Arena");
+        self.terrain[index] = terrain;
+    }
+
     fn cell_origin(&self, cell: CellCoord) -> Option<Position> {
         self.cell_index(cell)?;
         let units_per_cell = i64::from(WORLD_UNITS_PER_CELL);
@@ -390,7 +509,14 @@ struct Rect {
 }
 
 impl Rect {
-    fn footprint(position: Position, rules: MovementRules) -> Self {
+    fn overlaps(self, other: Self) -> bool {
+        self.left < other.right
+            && other.left < self.right
+            && self.top < other.bottom
+            && other.top < self.bottom
+    }
+
+    fn footprint(position: Position, rules: GameRules) -> Self {
         let half_side = i64::from(rules.footprint_side / 2);
         Self {
             left: i64::from(position.x().value()) - half_side,
@@ -401,13 +527,15 @@ impl Rect {
     }
 }
 
-/// Complete movement state. Equality and cloning include every authoritative field.
+/// Complete simulation state. Equality and cloning include every authoritative field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
     arena: Arena,
     character: Character,
     tick: u64,
-    rules: MovementRules,
+    rules: GameRules,
+    bomb: Option<Bomb>,
+    blasts: Vec<Blast>,
 }
 
 impl Game {
@@ -419,12 +547,14 @@ impl Game {
             character: scenario.character,
             tick: initial_tick,
             rules: scenario.rules,
+            bomb: None,
+            blasts: Vec::new(),
         }
     }
 
     /// Advance exactly one tick; the core has no clock or persistent held input.
     /// Errors preserve complete state, with priority duplicate, unknown, exhausted.
-    pub fn step(&mut self, frame: &[MovementCommand]) -> Result<(), StepError> {
+    pub fn step(&mut self, frame: &[CharacterCommand]) -> Result<(), StepError> {
         let mut identities = BTreeSet::new();
         for command in frame {
             if !identities.insert(command.character) {
@@ -438,11 +568,88 @@ impl Game {
             return Err(StepError::UnknownCharacter);
         }
         let next_tick = self.tick.checked_add(1).ok_or(StepError::TickExhausted)?;
-        if let Some(command) = frame.first() {
-            self.character.position = self.moved_position(command.direction);
+        let position = frame
+            .first()
+            .and_then(|command| command.movement)
+            .map_or(self.character.position, |direction| {
+                self.moved_position(direction)
+            });
+        let mut bomb = self.bomb;
+        if frame.first().is_some_and(|command| command.place_bomb) && bomb.is_none() {
+            bomb = Some(Bomb {
+                cell: self
+                    .arena
+                    .cell_containing(position)
+                    .expect("Character stays in Arena"),
+                detonate_at: next_tick
+                    .checked_add(self.rules.bomb_fuse_ticks)
+                    .ok_or(StepError::TickExhausted)?,
+                escape_allowed: true,
+            });
+        }
+        if let Some(bomb) = &mut bomb
+            && !Rect::footprint(position, self.rules).overlaps(self.arena.cell_bounds(bomb.cell))
+        {
+            bomb.escape_allowed = false;
+        }
+        let blast = if let Some(bomb) = bomb.filter(|bomb| {
+            bomb.detonate_at <= next_tick
+                || self
+                    .blasts
+                    .iter()
+                    .any(|blast| blast.expires_at > next_tick && blast.cells.contains(&bomb.cell))
+        }) {
+            Some(Blast {
+                cells: self.blast_coverage(bomb.cell),
+                expires_at: next_tick
+                    .checked_add(self.rules.blast_lifetime_ticks)
+                    .ok_or(StepError::TickExhausted)?,
+            })
+        } else {
+            None
+        };
+        // Everything fallible is checked before committing any live-state changes.
+        self.blasts.retain(|blast| blast.expires_at > next_tick);
+        self.character.position = position;
+        self.bomb = bomb;
+        if let Some(blast) = blast {
+            self.bomb = None;
+            for &cell in &blast.cells {
+                if self.arena.terrain_at(cell) == Some(Terrain::Block) {
+                    self.arena.set_terrain(cell, Terrain::Floor);
+                }
+            }
+            self.blasts.push(blast);
         }
         self.tick = next_tick;
         Ok(())
+    }
+
+    fn blast_coverage(&self, origin: CellCoord) -> Vec<CellCoord> {
+        let mut cells = vec![origin];
+        for direction in [
+            Direction::Up,
+            Direction::Right,
+            Direction::Down,
+            Direction::Left,
+        ] {
+            let mut cell = origin;
+            for _ in 0..self.rules.blast_reach {
+                let Some(next) = self.arena.neighbor(cell, direction) else {
+                    break;
+                };
+                let terrain = self.arena.terrain_at(next).expect("ray stays in Arena");
+                if terrain == Terrain::Wall {
+                    break;
+                }
+                cells.push(next);
+                if terrain == Terrain::Block {
+                    break;
+                }
+                cell = next;
+            }
+        }
+        cells
     }
 
     fn moved_position(&self, direction: Direction) -> Position {
@@ -511,7 +718,14 @@ impl Game {
                 swept.left = x - half;
             }
         }
-        for obstruction in self.arena.obstructions(swept) {
+        let blocking_bomb = self
+            .bomb
+            .iter()
+            .filter(|bomb| {
+                !bomb.escape_allowed && swept.overlaps(self.arena.cell_bounds(bomb.cell))
+            })
+            .map(|bomb| bomb.cell);
+        for obstruction in self.arena.obstructions(swept).chain(blocking_bomb) {
             let origin = self
                 .arena
                 .cell_origin(obstruction)
@@ -543,17 +757,24 @@ impl Game {
         &self.character
     }
 
-    pub fn rules(&self) -> &MovementRules {
+    pub fn rules(&self) -> &GameRules {
         &self.rules
+    }
+
+    pub fn bomb(&self) -> Option<&Bomb> {
+        self.bomb.as_ref()
+    }
+
+    pub fn blasts(&self) -> &[Blast] {
+        &self.blasts
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        Arena, CellCoord, Character, CharacterId, Column, ConstructionError, Direction, Game,
-        MovementCommand, MovementRules, Position, Row, Scenario, StepError, Terrain, WorldX,
-        WorldY,
+        Arena, CellCoord, Character, CharacterCommand, CharacterId, Column, ConstructionError,
+        Direction, Game, GameRules, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
     };
 
     const ID: CharacterId = CharacterId::new(42);
@@ -568,15 +789,16 @@ mod tests {
     }
 
     impl ScenarioInput {
-        fn parse(self, rules: MovementRules) -> Result<Scenario, ConstructionError> {
+        fn parse(self, rules: GameRules) -> Result<Scenario, ConstructionError> {
             Scenario::new(self.width, self.height, self.terrain, self.character, rules)
         }
     }
 
-    fn command(direction: Direction) -> MovementCommand {
-        MovementCommand {
+    fn command(direction: Direction) -> CharacterCommand {
+        CharacterCommand {
             character: ID,
-            direction,
+            movement: Some(direction),
+            place_bomb: false,
         }
     }
 
@@ -588,7 +810,7 @@ mod tests {
         CellCoord::new(Column::new(column), Row::new(row))
     }
 
-    fn assert_step(game: &mut Game, frame: &[MovementCommand], expected: Position) {
+    fn assert_step(game: &mut Game, frame: &[CharacterCommand], expected: Position) {
         let mut authored = scenario(
             game.arena().width(),
             game.arena().height(),
@@ -683,13 +905,13 @@ mod tests {
     #[test]
     fn construction_observes_the_complete_authored_state() {
         let authored = scenario(2, 1, vec![Terrain::Floor; 2], 256, 128);
-        let game = Game::new(authored.clone().parse(MovementRules::default()).unwrap(), 0);
+        let game = Game::new(authored.clone().parse(GameRules::default()).unwrap(), 0);
         assert_eq!(game.tick(), 0);
         assert_eq!(game.arena().width(), 2);
         assert_eq!(game.arena().height(), 1);
         assert_eq!(game.arena().terrain(), authored.terrain);
         assert_eq!(game.character(), &authored.character);
-        assert_eq!(game.rules(), &MovementRules::new(192, 16).unwrap());
+        assert_eq!(game.rules(), &GameRules::new(192, 16).unwrap());
         assert_eq!(game.clone(), game);
     }
 
@@ -705,7 +927,7 @@ mod tests {
                 1,
                 vec![Terrain::Floor],
                 character,
-                MovementRules::new(254, 1024).unwrap()
+                GameRules::new(254, 1024).unwrap()
             ),
             Err(ConstructionError::InvalidStartingPosition)
         );
@@ -714,7 +936,7 @@ mod tests {
             1,
             vec![Terrain::Floor],
             character,
-            MovementRules::new(128, 1024).unwrap(),
+            GameRules::new(128, 1024).unwrap(),
         )
         .unwrap();
         let mut game = Game::new(scenario, 0);
@@ -726,14 +948,14 @@ mod tests {
         for side in [0, 1, 3, 191, 255, 256, 258, u32::MAX] {
             for distance in [0, 16] {
                 assert_eq!(
-                    MovementRules::new(side, distance),
+                    GameRules::new(side, distance),
                     Err(ConstructionError::InvalidFootprintSide)
                 );
             }
         }
         for distance in [0, 1025, u32::MAX] {
             assert_eq!(
-                MovementRules::new(192, distance),
+                GameRules::new(192, distance),
                 Err(ConstructionError::InvalidMovementDistance)
             );
         }
@@ -743,7 +965,7 @@ mod tests {
     fn scenario_construction_rejects_invalid_data_and_accepts_limits() {
         use ConstructionError::*;
         let base = scenario(1, 1, vec![Terrain::Floor], 128, 128);
-        let defaults = MovementRules::default();
+        let defaults = GameRules::default();
         for (width, height) in [(0, 1), (1, 0), (257, 1), (1, 257), (u32::MAX, u32::MAX)] {
             let mut bad = base.clone();
             bad.width = width;
@@ -810,7 +1032,7 @@ mod tests {
                 authored.character.id = CharacterId::new(u32::MAX);
                 let game = Game::new(
                     authored
-                        .parse(MovementRules::new(side, distance).unwrap())
+                        .parse(GameRules::new(side, distance).unwrap())
                         .unwrap(),
                     u64::MAX,
                 );
@@ -824,7 +1046,7 @@ mod tests {
     fn cardinal_commands_apply_only_to_their_tick() {
         let base = Game::new(
             scenario(3, 3, vec![Terrain::Floor; 9], 384, 384)
-                .parse(MovementRules::default())
+                .parse(GameRules::default())
                 .unwrap(),
             0,
         );
@@ -848,7 +1070,7 @@ mod tests {
     #[test]
     fn swept_footprints_stop_at_the_first_obstruction_without_a_gap_or_sideways_motion() {
         use Direction::*;
-        let fast = MovementRules::new(192, 512).unwrap();
+        let fast = GameRules::new(192, 512).unwrap();
         let cases = [
             (rows(".#..", 128, 128), fast, Right, point(160, 128)),
             (rows(".+..", 128, 128), fast, Right, point(160, 128)),
@@ -916,13 +1138,13 @@ mod tests {
             ),
             (
                 rows("..#..+..", 128, 128),
-                MovementRules::new(192, 1024).unwrap(),
+                GameRules::new(192, 1024).unwrap(),
                 Right,
                 point(416, 128),
             ),
             (
                 rows("..#.+...", 1920, 128),
-                MovementRules::new(192, 1024).unwrap(),
+                GameRules::new(192, 1024).unwrap(),
                 Left,
                 point(1376, 128),
             ),
@@ -934,9 +1156,7 @@ mod tests {
             assert_step(&mut game, &[], expected);
         }
         let mut approaching = Game::new(
-            rows(".#..", 128, 128)
-                .parse(MovementRules::default())
-                .unwrap(),
+            rows(".#..", 128, 128).parse(GameRules::default()).unwrap(),
             0,
         );
         for x in [144, 160, 160] {
@@ -954,7 +1174,7 @@ mod tests {
         ] {
             let mut game = Game::new(
                 rows(".", 128, 128)
-                    .parse(MovementRules::new(192, 1024).unwrap())
+                    .parse(GameRules::new(192, 1024).unwrap())
                     .unwrap(),
                 0,
             );
@@ -971,7 +1191,7 @@ mod tests {
                     65536 - radius - 1,
                     radius + 1,
                 )
-                .parse(MovementRules::new(side, 1024).unwrap())
+                .parse(GameRules::new(side, 1024).unwrap())
                 .unwrap(),
                 0,
             );
@@ -1002,7 +1222,7 @@ mod tests {
     fn a_blocked_turn_spends_its_tick_budget_on_the_nearest_legal_entry() {
         let mut game = Game::new(
             rows("...\n.#.\n...", 192, 160)
-                .parse(MovementRules::default())
+                .parse(GameRules::default())
                 .unwrap(),
             0,
         );
@@ -1032,7 +1252,7 @@ mod tests {
     fn a_safe_entry_can_be_away_from_the_current_cell_centreline() {
         let mut game = Game::new(
             rows("...\n#..\n...", 352, 272)
-                .parse(MovementRules::default())
+                .parse(GameRules::default())
                 .unwrap(),
             0,
         );
@@ -1072,7 +1292,7 @@ mod tests {
         ] {
             let mut game = Game::new(
                 rows("...\n.#.\n...", x, y)
-                    .parse(MovementRules::default())
+                    .parse(GameRules::default())
                     .unwrap(),
                 0,
             );
@@ -1101,10 +1321,10 @@ mod tests {
             ] {
                 let authored = rows("...\n.#.\n...", start.x().value(), start.y().value());
                 let mut assisted =
-                    Game::new(authored.clone().parse(MovementRules::default()).unwrap(), 0);
+                    Game::new(authored.clone().parse(GameRules::default()).unwrap(), 0);
                 let mut strict = Game::new(
                     authored
-                        .parse(MovementRules::default().with_turn_assistance(false))
+                        .parse(GameRules::default().with_turn_assistance(false))
                         .unwrap(),
                     0,
                 );
@@ -1163,7 +1383,7 @@ mod tests {
         ] {
             let mut game = Game::new(
                 rows(layout, start.x().value(), start.y().value())
-                    .parse(MovementRules::default())
+                    .parse(GameRules::default())
                     .unwrap(),
                 0,
             );
@@ -1180,7 +1400,7 @@ mod tests {
     fn assistance_cannot_cross_an_obstruction_to_reach_a_forward_opening() {
         let mut game = Game::new(
             rows(".#.\n#..\n#..", 257, 257)
-                .parse(MovementRules::new(2, 1).unwrap())
+                .parse(GameRules::new(2, 1).unwrap())
                 .unwrap(),
             0,
         );
@@ -1226,7 +1446,7 @@ mod tests {
         ] {
             let mut game = Game::new(
                 rows(layout, start.x().value(), start.y().value())
-                    .parse(MovementRules::new(192, distance).unwrap())
+                    .parse(GameRules::new(192, distance).unwrap())
                     .unwrap(),
                 0,
             );
@@ -1236,7 +1456,7 @@ mod tests {
 
     #[test]
     fn strict_off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_character() {
-        let strict = MovementRules::default().with_turn_assistance(false);
+        let strict = GameRules::default().with_turn_assistance(false);
         let classic = r#"
 #######
 #.....#
@@ -1328,7 +1548,7 @@ mod tests {
         );
     }
 
-    fn assert_rejected(game: &mut Game, frame: &[MovementCommand], error: StepError) {
+    fn assert_rejected(game: &mut Game, frame: &[CharacterCommand], error: StepError) {
         let before = game.clone();
         assert_eq!(
             game.step(frame),
@@ -1342,13 +1562,15 @@ mod tests {
     #[test]
     fn malformed_frames_are_atomic_and_error_priority_is_order_independent() {
         let known = command(Direction::Right);
-        let unknown = MovementCommand {
+        let unknown = CharacterCommand {
             character: CharacterId::new(43),
-            direction: Direction::Left,
+            movement: Some(Direction::Left),
+            place_bomb: false,
         };
-        let other_unknown = MovementCommand {
+        let other_unknown = CharacterCommand {
             character: CharacterId::new(u32::MAX),
-            direction: Direction::Down,
+            movement: Some(Direction::Down),
+            place_bomb: false,
         };
         let faults = [
             (vec![known, known], StepError::DuplicateCommand),
@@ -1366,9 +1588,7 @@ mod tests {
                 StepError::DuplicateCommand,
             ),
         ];
-        let scenario = rows("..", 128, 128)
-            .parse(MovementRules::default())
-            .unwrap();
+        let scenario = rows("..", 128, 128).parse(GameRules::default()).unwrap();
         for tick in [0, u64::MAX] {
             let mut game = Game::new(scenario.clone(), tick);
             for (frame, error) in &faults {
@@ -1395,22 +1615,20 @@ mod tests {
             (160, vec![command(Direction::Right)], point(160, 128)),
         ] {
             let authored = rows(".#", start, 128);
-            let mut game = Game::new(
-                authored.parse(MovementRules::default()).unwrap(),
-                u64::MAX - 1,
-            );
+            let mut game = Game::new(authored.parse(GameRules::default()).unwrap(), u64::MAX - 1);
             assert_step(&mut game, &frame, expected);
             assert_eq!(game.tick(), u64::MAX);
             assert_rejected(&mut game, &frame, StepError::TickExhausted);
         }
         let mut authored = rows("..", 128, 128);
         authored.character.id = CharacterId::new(0);
-        let mut game = Game::new(authored.parse(MovementRules::default()).unwrap(), 0);
+        let mut game = Game::new(authored.parse(GameRules::default()).unwrap(), 0);
         assert_step(
             &mut game,
-            &[MovementCommand {
+            &[CharacterCommand {
                 character: CharacterId::new(0),
-                direction: Direction::Right,
+                movement: Some(Direction::Right),
+                place_bomb: false,
             }],
             point(144, 128),
         );
@@ -1418,7 +1636,7 @@ mod tests {
 
     // Independent reference: enumerate ALL terrain rectangles and measure positive-area
     // overlap directly. No production geometry, cell query, or advancement helper is used.
-    fn reference_legal(authored: &ScenarioInput, rules: MovementRules, position: Position) -> bool {
+    fn reference_legal(authored: &ScenarioInput, rules: GameRules, position: Position) -> bool {
         let radius = i64::from(rules.footprint_side() / 2);
         let (left, right) = (
             i64::from(position.x().value()) - radius,
@@ -1462,7 +1680,7 @@ mod tests {
 
     fn reference_cardinal(
         authored: &ScenarioInput,
-        rules: MovementRules,
+        rules: GameRules,
         mut position: Position,
         direction: Direction,
         distance: u32,
@@ -1480,7 +1698,7 @@ mod tests {
 
     fn reference_move(
         authored: &ScenarioInput,
-        rules: MovementRules,
+        rules: GameRules,
         direction: Direction,
     ) -> Position {
         let start = authored.character.position;
@@ -1546,7 +1764,7 @@ mod tests {
     #[test]
     fn off_centre_corridor_entries_make_safe_progress_within_fifteen_ticks() {
         use Direction::*;
-        let rules = MovementRules::default();
+        let rules = GameRules::default();
         // Downward entrance at y=768, with legal corridor centres x=608..=672.
         // At contact, y=672 is 96 units before the mouth. Even a 128-unit
         // correction plus 97 forward units fits in 15 ticks at 16 units/tick.
@@ -1702,20 +1920,21 @@ mod tests {
             }
             if frames.len() == 11 {
                 frames.push((
-                    vec![MovementCommand {
+                    vec![CharacterCommand {
                         character: CharacterId::new(43),
-                        direction: Right,
+                        movement: Some(Right),
+                        place_bomb: false,
                     }],
                     Err(StepError::UnknownCharacter),
                 ));
             }
         }
         for rules in [
-            MovementRules::default(),
-            MovementRules::new(2, 1).unwrap(),
-            MovementRules::new(128, 257).unwrap(),
-            MovementRules::new(192, 512).unwrap(),
-            MovementRules::new(254, 1024).unwrap(),
+            GameRules::default(),
+            GameRules::new(2, 1).unwrap(),
+            GameRules::new(128, 257).unwrap(),
+            GameRules::new(192, 512).unwrap(),
+            GameRules::new(254, 1024).unwrap(),
         ]
         .into_iter()
         .flat_map(|rules| [rules.with_turn_assistance(false), rules])
@@ -1730,7 +1949,7 @@ mod tests {
                 if outcome.is_ok() {
                     if let Some(input) = frame.first() {
                         reference.character.position =
-                            reference_move(&reference, rules, input.direction);
+                            reference_move(&reference, rules, input.movement.unwrap());
                     }
                     reference_tick += 1;
                 }
