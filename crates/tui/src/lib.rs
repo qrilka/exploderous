@@ -9,7 +9,7 @@ use ratatui::{
     Frame,
     layout::{Alignment, Rect},
     text::Line,
-    widgets::{Paragraph, Wrap},
+    widgets::{Block, Clear, Paragraph, Wrap},
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -19,13 +19,14 @@ pub const MIN_HEIGHT: u16 = 11;
 const MAX_CATCH_UP_TICKS: usize = 5;
 const MAP_SIZE: u16 = 9;
 const STATUS: &str = "Lives: 0 | Score: 0";
-const HELP: &str = r#"BOMB PLAYGROUND
+const HELP: &str = r#"BOMB SURVIVAL
 
 Controls
 Arrow keys: move; latest press wins; release falls back
 Space: place one Bomb; place another after it detonates
-Blasts clear Blocks but are not lethal in this slice
-R: reset; Q or Escape: quit
+Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over
+Game Over freezes play; only restart or quit acts
+R: restart during play or Game Over; Q or Escape: quit
 ?, h, or H: open or close help
 Up/Down: scroll; Escape closes help
 Offset: signed X,Y world-unit delta from the current Cell centre; 0,0 is centred
@@ -98,6 +99,17 @@ impl App {
 
     pub fn handle_key(&mut self, event: KeyEvent, now: Instant) {
         self.reconcile_clock(now);
+        if self.game.outcome().is_some()
+            && !matches!(
+                (event.code, event.kind),
+                (
+                    KeyCode::Char('r' | 'R' | 'q' | 'Q') | KeyCode::Esc,
+                    KeyEventKind::Press
+                )
+            )
+        {
+            return;
+        }
         if self.help_open {
             match (event.code, event.kind) {
                 (KeyCode::Esc, KeyEventKind::Press)
@@ -191,14 +203,20 @@ impl App {
                 place_bomb,
                 position: self.game.character().position,
             });
+            if self.game.outcome().is_some() {
+                self.reconcile_clock(now);
+                break;
+            }
         }
 
-        let remainder = elapsed.as_nanos() % TICK_INTERVAL.as_nanos();
-        let until_next = TICK_INTERVAL.as_nanos() - remainder;
-        self.next_tick = Some(now + Duration::from_nanos(until_next as u64));
+        if !self.paused() {
+            let remainder = elapsed.as_nanos() % TICK_INTERVAL.as_nanos();
+            let until_next = TICK_INTERVAL.as_nanos() - remainder;
+            self.next_tick = Some(now + Duration::from_nanos(until_next as u64));
+        }
         Ok(AdvanceReport {
+            discarded_ticks: overdue - ticks.len() as u128,
             ticks,
-            discarded_ticks: overdue - tick_count as u128,
         })
     }
 
@@ -231,7 +249,7 @@ impl App {
     }
 
     fn paused(&self) -> bool {
-        self.quit || !self.can_move() || self.help_open
+        self.quit || !self.can_move() || self.help_open || self.game.outcome().is_some()
     }
 
     fn reconcile_clock(&mut self, now: Instant) {
@@ -406,6 +424,17 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(map),
         Rect::new(map_x, top, MAP_SIZE, MAP_SIZE),
     );
+    if app.game.outcome().is_some() {
+        let modal = Rect::new(area.x + (area.width - MIN_WIDTH) / 2, top + 2, MIN_WIDTH, 5);
+        frame.render_widget(Clear, modal);
+        frame.render_widget(
+            Paragraph::new("GAME OVER\nR: restart\nQ/Esc: quit")
+                .alignment(Alignment::Center)
+                .block(Block::bordered()),
+            modal,
+        );
+        return;
+    }
     frame.render_widget(
         Paragraph::new(STATUS).alignment(Alignment::Center),
         Rect::new(area.x, top + MAP_SIZE, area.width, 1),
