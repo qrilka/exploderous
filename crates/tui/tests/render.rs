@@ -1,3 +1,5 @@
+mod support;
+
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -67,6 +69,9 @@ fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
     let app = App::new(Instant::now(), 19, 11);
     let terminal = draw(&app, 19, 11);
     let buffer = terminal.backend().buffer();
+    let exit = app.game().exit().expect("the Normal level has an Exit");
+    assert_eq!((exit.column().value(), exit.row().value()), (5, 3));
+    assert!(!screen(&terminal).join("\n").contains('⬚'));
 
     assert_eq!(buffer[(5, 0)].symbol(), "█");
     assert_eq!(buffer[(6, 1)].symbol(), "@");
@@ -196,6 +201,53 @@ fn a_bomb_clears_a_passage_and_its_blast_covers_the_destroyed_block() {
 }
 
 #[test]
+fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() {
+    let mut now = Instant::now();
+    let mut app = App::new(now, 19, 11);
+    support::reveal_exit(&mut app, &mut now);
+    assert_eq!(app.game().outcome(), None);
+    assert_eq!(app.game().tick(), 201);
+    assert_eq!(draw(&app, 19, 11).backend().buffer()[(10, 3)].symbol(), "│");
+    assert!(!screen(&draw(&app, 19, 11)).join("\n").contains('⬚'));
+    support::ticks(&mut app, &mut now, 30);
+    assert_eq!(draw(&app, 19, 11).backend().buffer()[(10, 3)].symbol(), "⬚");
+    support::travel(&mut app, &mut now, KeyCode::Left, 16);
+    support::travel(&mut app, &mut now, KeyCode::Down, 24);
+    for (width, height, left, top) in [(19, 11, 0, 2), (80, 30, 30, 11)] {
+        let rows = screen(&draw(&app, width, height));
+        for (line, expected) in [
+            "┌─────────────────┐",
+            "│    VICTORY!     │",
+            "│   R: restart    │",
+            "│   Q/Esc: quit   │",
+            "└─────────────────┘",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                rows[top + line]
+                    .chars()
+                    .skip(left)
+                    .take(19)
+                    .collect::<String>(),
+                expected
+            );
+        }
+        assert!(!rows.join("\n").contains("GAME OVER"));
+    }
+    let victory = screen(&draw(&app, 19, 11));
+    app.handle_key(key(KeyCode::Char('h')), now);
+    support::ticks(&mut app, &mut now, 100);
+    assert_eq!(screen(&draw(&app, 19, 11)), victory);
+    app.handle_key(key(KeyCode::Char('r')), now);
+    assert_eq!(
+        screen(&draw(&app, 19, 11)),
+        screen(&draw(&App::new(now, 19, 11), 19, 11))
+    );
+}
+
+#[test]
 fn larger_terminal_centers_the_fixed_arena_and_status_below_it() {
     let app = App::new(Instant::now(), 30, 20);
     let terminal = draw(&app, 30, 20);
@@ -249,15 +301,17 @@ fn center_offset_shows_gradual_assistance_without_claiming_full_centering() {
 #[test]
 fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels() {
     let now = Instant::now();
-    let mut app = App::new(now, 80, 30);
+    let mut app = App::new(now, 80, 40);
     app.handle_key(key(KeyCode::Char('h')), now);
-    let terminal = draw(&app, 80, 30);
+    let terminal = draw(&app, 80, 40);
     let text = screen(&terminal).join("\n");
     for entry in [
         "Arrow keys: move",
         "Space: place one Bomb; place another after it detonates",
         "Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over",
-        "R: restart during play or Game Over; Q or Escape: quit",
+        "Bombs reveal an Exit hidden beneath a Block; reach its Cell alive to win",
+        "Victory or Game Over freezes play; only restart or quit acts",
+        "R: restart during play or either outcome; Q or Escape: quit",
         "(blank space) Floor",
         "█ Wall",
         "▒ Block",
@@ -282,6 +336,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "┼ Blast centre",
         "│ Blast north/south arms",
         "─ Blast east/west arms",
+        "⬚ Exit",
     ] {
         assert!(live.contains(entry));
         assert!(!reserved.contains(entry));

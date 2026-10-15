@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use exploderous_core::game::{
     CellCoord, Character, CharacterCommand, CharacterId, Column, Direction, Game, GameRules,
-    Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
+    Outcome, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
 };
 use ratatui::{
     Frame,
@@ -19,14 +19,15 @@ pub const MIN_HEIGHT: u16 = 11;
 const MAX_CATCH_UP_TICKS: usize = 5;
 const MAP_SIZE: u16 = 9;
 const STATUS: &str = "Lives: 0 | Score: 0";
-const HELP: &str = r#"BOMB SURVIVAL
+const HELP: &str = r#"NORMAL LEVEL
 
 Controls
 Arrow keys: move; latest press wins; release falls back
 Space: place one Bomb; place another after it detonates
 Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over
-Game Over freezes play; only restart or quit acts
-R: restart during play or Game Over; Q or Escape: quit
+Bombs reveal an Exit hidden beneath a Block; reach its Cell alive to win
+Victory or Game Over freezes play; only restart or quit acts
+R: restart during play or either outcome; Q or Escape: quit
 ?, h, or H: open or close help
 Up/Down: scroll; Escape closes help
 Offset: signed X,Y world-unit delta from the current Cell centre; 0,0 is centred
@@ -40,11 +41,11 @@ Live map
 ┼ Blast centre
 │ Blast north/south arms
 ─ Blast east/west arms
+⬚ Exit
 
 Reserved glyphs
 a AI-controlled non-Enemy Character
 e Enemy Character (takes precedence over AI)
-⬚ Exit
 ▣ Bomb-capacity Item
 ◈ Blast-reach Item"#;
 
@@ -349,7 +350,9 @@ fn new_game(rules: GameRules) -> Game {
         },
         rules,
     )
-    .expect("the fixed playground arena is valid");
+    .expect("the fixed Level arena is valid")
+    .with_exit(CellCoord::new(Column::new(5), Row::new(3)))
+    .expect("the Exit is beneath its authored Block");
     Game::new(scenario, 0)
 }
 
@@ -408,6 +411,8 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
                         } else {
                             '│'
                         }
+                    } else if app.game.exit() == Some(cell) {
+                        '⬚'
                     } else {
                         ' '
                     }
@@ -424,11 +429,15 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(map),
         Rect::new(map_x, top, MAP_SIZE, MAP_SIZE),
     );
-    if app.game.outcome().is_some() {
+    if let Some(outcome) = app.game.outcome() {
+        let message = match outcome {
+            Outcome::Defeat => "GAME OVER",
+            Outcome::Victory => "VICTORY!",
+        };
         let modal = Rect::new(area.x + (area.width - MIN_WIDTH) / 2, top + 2, MIN_WIDTH, 5);
         frame.render_widget(Clear, modal);
         frame.render_widget(
-            Paragraph::new("GAME OVER\nR: restart\nQ/Esc: quit")
+            Paragraph::new(format!("{message}\nR: restart\nQ/Esc: quit"))
                 .alignment(Alignment::Center)
                 .block(Block::bordered()),
             modal,

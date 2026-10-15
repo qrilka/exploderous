@@ -1,7 +1,11 @@
+mod support;
+
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use exploderous_core::game::{Direction, GameRules, Outcome, Position, WorldX, WorldY};
+use exploderous_core::game::{
+    CharacterCommand, Direction, GameRules, Outcome, Position, WorldX, WorldY,
+};
 use exploderous_tui::{App, TICK_INTERVAL, TickRecord};
 
 fn point(x: i32, y: i32) -> Position {
@@ -21,24 +25,54 @@ fn release(code: KeyCode) -> KeyEvent {
 }
 
 #[test]
-fn a_reachable_loss_stops_catch_up_freezes_input_and_restarts_cleanly() {
+fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
     let start = Instant::now();
-    for assisted in [true, false] {
+    for (assisted, outcome) in [
+        (true, Outcome::Defeat),
+        (false, Outcome::Defeat),
+        (true, Outcome::Victory),
+        (false, Outcome::Victory),
+    ] {
         let rules = GameRules::default().with_turn_assistance(assisted);
         let mut app = App::new_with_rules(start, 19, 11, rules);
-        app.handle_key(press(KeyCode::Char(' ')), start);
-        for tick in 1..=119 {
-            app.advance(start + TICK_INTERVAL * tick).unwrap();
-        }
-        let now = start + TICK_INTERVAL * 119;
-        app.handle_key(press(KeyCode::Right), now);
-        app.handle_key(press(KeyCode::Char(' ')), now); // capacity rejection, not deferred
-        let ended_at = start + TICK_INTERVAL * 130;
+        let mut now = start;
+        let (direction, terminal_tick) = match outcome {
+            Outcome::Defeat => {
+                app.handle_key(press(KeyCode::Char(' ')), now);
+                support::ticks(&mut app, &mut now, 119);
+                (KeyCode::Right, 121)
+            }
+            Outcome::Victory => {
+                support::reveal_exit(&mut app, &mut now);
+                support::ticks(&mut app, &mut now, 30);
+                support::travel(&mut app, &mut now, KeyCode::Left, 16);
+                support::travel(&mut app, &mut now, KeyCode::Down, 22);
+                (KeyCode::Down, 271)
+            }
+        };
+        let mut continuation = app.game().clone();
+        app.handle_key(press(direction), now);
+        app.handle_key(press(KeyCode::Char(' ')), now);
+        let ended_at = now + TICK_INTERVAL * 11;
         let report = app.advance(ended_at).unwrap();
-        assert_eq!(report.ticks.len(), 2); // tick 121 detonates, don't finish the batch
+        assert_eq!(report.ticks.len(), 2); // don't finish the batch after an outcome
         assert_eq!(report.discarded_ticks, 9);
-        assert_eq!(app.game().outcome(), Some(Outcome::Defeat));
-        assert_eq!(app.game().tick(), 121);
+        assert_eq!(app.game().outcome(), Some(outcome));
+        assert_eq!(app.game().tick(), terminal_tick);
+        for record in &report.ticks {
+            continuation
+                .step(&[CharacterCommand {
+                    character: continuation.character().id,
+                    movement: record.direction,
+                    place_bomb: record.place_bomb,
+                }])
+                .unwrap();
+        }
+        assert_eq!(app.game(), &continuation); // whole-Game clone across the outcome
+        for _ in 0..100 {
+            continuation.step(&[]).unwrap();
+        }
+        assert_eq!(app.game(), &continuation); // timers, terrain and live Bomb all freeze
         assert_eq!(app.held_direction(), None);
         assert_eq!(app.next_tick(), None);
         let defeated = app.game().clone();
@@ -92,6 +126,17 @@ fn a_reachable_loss_stops_catch_up_freezes_input_and_restarts_cleanly() {
         app.handle_key(press(KeyCode::Char(' ')), resumed + TICK_INTERVAL);
         app.advance(resumed + TICK_INTERVAL * 2).unwrap();
         assert!(app.game().bomb().is_some());
+        if outcome == Outcome::Victory {
+            // A second successful run after restart, using the identical authored Level.
+            let mut now = resumed + TICK_INTERVAL * 2;
+            app.handle_key(press(KeyCode::Char('r')), now);
+            support::reveal_exit(&mut app, &mut now);
+            support::ticks(&mut app, &mut now, 30);
+            support::travel(&mut app, &mut now, KeyCode::Left, 16);
+            support::travel(&mut app, &mut now, KeyCode::Down, 24);
+            assert_eq!(app.game().outcome(), Some(Outcome::Victory));
+            assert_eq!(app.game().tick(), 271);
+        }
     }
 }
 
@@ -156,15 +201,28 @@ fn the_reported_neighbouring_cell_escape_survives_but_remaining_in_danger_loses(
 fn outcome_quit_commands_act_only_on_press() {
     let start = Instant::now();
     let rules = GameRules::default().with_bomb_parameters(1, 1, 30).unwrap();
-    for code in [KeyCode::Char('q'), KeyCode::Char('Q'), KeyCode::Esc] {
-        let mut app = App::new_with_rules(start, 19, 11, rules);
-        app.handle_key(press(KeyCode::Char(' ')), start);
-        app.advance(start + TICK_INTERVAL * 2).unwrap();
-        assert_eq!(app.game().outcome(), Some(Outcome::Defeat));
-        app.handle_key(key(code, KeyEventKind::Repeat), start + TICK_INTERVAL * 2);
-        assert!(!app.quit_requested());
-        app.handle_key(press(code), start + TICK_INTERVAL * 2);
-        assert!(app.quit_requested());
+    for outcome in [Outcome::Defeat, Outcome::Victory] {
+        for code in [KeyCode::Char('q'), KeyCode::Char('Q'), KeyCode::Esc] {
+            let mut now = start;
+            let mut app = if outcome == Outcome::Defeat {
+                let mut app = App::new_with_rules(now, 19, 11, rules);
+                app.handle_key(press(KeyCode::Char(' ')), now);
+                support::ticks(&mut app, &mut now, 2);
+                app
+            } else {
+                let mut app = App::new(now, 19, 11);
+                support::reveal_exit(&mut app, &mut now);
+                support::ticks(&mut app, &mut now, 30);
+                support::travel(&mut app, &mut now, KeyCode::Left, 16);
+                support::travel(&mut app, &mut now, KeyCode::Down, 24);
+                app
+            };
+            assert_eq!(app.game().outcome(), Some(outcome));
+            app.handle_key(key(code, KeyEventKind::Repeat), now);
+            assert!(!app.quit_requested());
+            app.handle_key(press(code), now);
+            assert!(app.quit_requested());
+        }
     }
 }
 
