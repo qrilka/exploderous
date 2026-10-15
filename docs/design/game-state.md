@@ -78,7 +78,7 @@ struct Character {
 
 `Position` is the character's centre in integer world units, not a terrain cell coordinate or a screen pixel. Its axis-specific newtypes prevent swapping world X and Y. `CellCoord` likewise keeps Column distinct from Row; it is a grid address, not the physical Cell area. The origin is the arena's outer top-left corner; X increases rightward and Y downward. One fixed scale relates world units to cell side length. `Arena` is the canonical conversion point: it maps a Position to its containing in-bounds `CellCoord`, maps an in-bounds `CellCoord` to its world-space centre, and owns row-major terrain indexing. Cell assignment uses consecutive lower-inclusive, upper-exclusive intervals; negative or out-of-Arena positions have no containing cell. A footprint can span several cells regardless of its centre's cell.
 
-The initial bomber's footprint is a square whose sides remain horizontal and vertical. Its side length is smaller than a cell so one-cell-wide corridors allow some positioning error. The allowed deviation from a corridor's centreline is half the difference between the cell and footprint side lengths. Rectangles overlap only when their intersections have positive length on both axes; edge or corner contact alone is safe.
+The initial bomber's footprint is a square whose sides remain horizontal and vertical. Its side length is smaller than a cell so one-cell-wide corridors allow some positioning error. The allowed deviation from a corridor's centreline is half the difference between the cell and footprint side lengths. For movement collision and Bomb escape permissions, rectangles overlap only when their intersections have positive length on both axes; edge or corner contact alone is safe. Blast damage instead uses the Character's centre-containing Cell, as specified below.
 
 Movement:
 
@@ -149,7 +149,7 @@ One blast record covers a set of cells and lasts for several simulation ticks. C
 
 Each blast has its own lifetime. If A and B overlap, expiry of A must not remove B's danger. Cell danger is derived from live effect records; an independent mutable `is_on_fire` terrain flag would duplicate truth. An acceleration structure would be a derived index. Source attribution and other effect-specific state are required only by rules that depend on them.
 
-Damage uses footprint overlap, not just the centre's cell. Check the traveled path against blasts already live during movement, including both actual turn-assistance segments. A blast created after movement checks the final footprint, consistent with actions preceding explosions. Exact edge contact is safe; overlap is harmful.
+Damage uses the Cell containing the Character's centre, independently of its Footprint. Body overlap with a Blast is safe while the centre remains outside covered Cells. Cell membership uses the same lower-inclusive, upper-exclusive boundaries as Arena coordinate conversion; a centre exactly on a boundary belongs to the Cell on its right/bottom. Check the entire actually traveled centre path against Blasts already live during movement, including both actual turn-assistance segments and their endpoints; crossing danger cannot be undone by a safe endpoint. A stationary centre in a live Blast Cell is also lethal. A Blast created after movement checks only the final centre-containing Cell, consistent with actions preceding explosions.
 
 A blast can trigger another bomb in the same tick. All propagation in that explosion phase uses the terrain present at its start: destroying a block does not open a route for a second same-phase ray. Bomb processing order must not change blast reach. Even with capacity one, an earlier lingering blast can trigger a newly placed bomb; capacity counts undetonated bombs rather than live effects.
 
@@ -200,7 +200,7 @@ Power-up effects, item destruction by blasts (especially newly revealed items), 
 
 The initial Normal level has one life per run. Lethal blast contact ends the run in defeat; alive centre entry into the uncovered exit ends it in victory. Harm precedes victory even if both conditions arise during the same tick.
 
-Either outcome freezes the complete simulation, including tick progression, movement, placement, and bomb/blast deadlines. A frontend stops any catch-up batch immediately when the outcome occurs. It displays a distinct outcome and accepts only restart or quit, not movement, placement, or active-play help.
+Either outcome freezes the complete simulation, including tick progression, movement, placement, and bomb/blast deadlines. A frontend stops any catch-up batch immediately when the outcome occurs. The TUI displays defeat in a centered modal over the Arena with readable restart/quit instructions. The outcome view accepts only restart or quit, not movement, placement, or active-play help.
 
 Restart creates a fresh run from the original scenario and selected rules: initial terrain, covered exit, character position, initial tick, active lifecycle, and available bomb capacity. It removes bombs, blasts, and escape permissions. Frontends also clear held directions, pending placement, and elapsed-time backlog; no old action or paused time leaks into the new run.
 

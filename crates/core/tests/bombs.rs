@@ -1,6 +1,6 @@
 use exploderous_core::game::{
     CellCoord, Character, CharacterCommand, CharacterId, Column, ConstructionError, Direction,
-    Game, GameRules, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
+    Game, GameRules, Outcome, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
 };
 
 const PLAYER: CharacterId = CharacterId::new(0);
@@ -52,6 +52,216 @@ fn actions(movement: Option<Direction>, place_bomb: bool) -> CharacterCommand {
 }
 
 #[test]
+fn a_new_blast_kills_in_the_final_centre_cell_and_freezes_the_complete_run() {
+    let rules = GameRules::default().with_bomb_parameters(1, 1, 30).unwrap();
+    let mut game = game(".+.", point(128, 128), rules, 0);
+    game.step(&[actions(None, true)]).unwrap();
+    let mut sibling = game.clone();
+    game.step(&[]).unwrap();
+    sibling.step(&[]).unwrap();
+    assert_eq!(game, sibling);
+    assert_eq!(game.outcome(), Some(Outcome::Defeat));
+    assert_eq!(game.tick(), 2);
+    assert_eq!(game.arena().terrain_at(cell(1, 0)), Some(Terrain::Floor));
+    assert_eq!(game.blasts().len(), 1);
+    let defeated = game.clone();
+    for _ in 0..100 {
+        game.step(&[actions(Some(Direction::Right), true)]).unwrap();
+        sibling.step(&[]).unwrap();
+        assert_eq!(game, defeated);
+        assert_eq!(sibling, defeated);
+    }
+}
+
+#[test]
+fn new_blast_damage_uses_the_final_centre_cell_with_half_open_boundaries() {
+    // The vertical Blast spans y=256..1024. The body may overlap safely;
+    // centre membership includes y=256 but excludes y=1024.
+    for (direction, distance, expected_y, expected_row, outcome) in [
+        (Direction::Up, 385, 255, 0, None),
+        (Direction::Up, 384, 256, 1, Some(Outcome::Defeat)),
+        (Direction::Up, 383, 257, 1, Some(Outcome::Defeat)),
+        (Direction::Down, 383, 1023, 3, Some(Outcome::Defeat)),
+        (Direction::Down, 384, 1024, 4, None),
+    ] {
+        let rules = GameRules::new(192, distance)
+            .unwrap()
+            .with_bomb_parameters(1, 1, 30)
+            .unwrap();
+        let mut game = game(
+            ".....\n.....\n.....\n.....\n.....",
+            point(640, 640),
+            rules,
+            0,
+        );
+        game.step(&[actions(None, true)]).unwrap();
+        game.step(&[actions(Some(direction), false)]).unwrap();
+        assert_eq!(game.character().position, point(640, expected_y));
+        assert_eq!(
+            game.arena().cell_containing(game.character().position),
+            Some(cell(2, expected_row))
+        );
+        assert_eq!(game.outcome(), outcome);
+    }
+}
+
+#[test]
+fn existing_blasts_kill_a_crossing_with_a_safe_endpoint_but_expire_before_movement() {
+    for (lifetime, outcome) in [(30, Some(Outcome::Defeat)), (1, None)] {
+        let rules = GameRules::new(192, 1024)
+            .unwrap()
+            .with_bomb_parameters(1, 1, lifetime)
+            .unwrap();
+        let mut game = game(
+            ".....\n.....\n.....\n.....\n.....\n.....",
+            point(640, 640),
+            rules,
+            0,
+        );
+        game.step(&[actions(None, true)]).unwrap();
+        game.step(&[actions(Some(Direction::Up), false)]).unwrap();
+        assert_eq!(game.character().position, point(640, 96));
+        assert_eq!(game.outcome(), None); // clear before detonation
+        let mut sibling = game.clone();
+        game.step(&[actions(Some(Direction::Down), true)]).unwrap();
+        sibling
+            .step(&[actions(Some(Direction::Down), true)])
+            .unwrap();
+        assert_eq!(game, sibling);
+        // Blast ends at y=1024; the endpoint's top is exactly 1024: safe.
+        assert_eq!(game.character().position, point(640, 1120));
+        assert_eq!(game.outcome(), outcome);
+        assert_eq!(game.blasts().is_empty(), lifetime == 1);
+        assert!(game.bomb().is_some()); // placement precedes harm, even on the losing tick
+        if outcome.is_some() {
+            let defeated = game.clone();
+            for _ in 0..100 {
+                game.step(&[actions(Some(Direction::Up), true)]).unwrap();
+                assert_eq!(game, defeated); // live Bomb, permission and effects all freeze
+            }
+        }
+    }
+}
+
+#[test]
+fn existing_blast_centre_paths_include_lower_edges_but_exclude_upper_edges_in_both_axes() {
+    let rules = GameRules::new(192, 128)
+        .unwrap()
+        .with_bomb_parameters(4, 1, 30)
+        .unwrap();
+    for (escape, returning, lower_edge) in [
+        (Direction::Up, Direction::Down, true),
+        (Direction::Left, Direction::Right, true),
+        (Direction::Down, Direction::Up, false),
+        (Direction::Right, Direction::Left, false),
+    ] {
+        let mut game = game(
+            ".....\n.....\n.....\n.....\n.....",
+            point(640, 640),
+            rules,
+            0,
+        );
+        game.step(&[actions(None, true)]).unwrap();
+        for _ in 0..4 {
+            game.step(&[actions(Some(escape), false)]).unwrap();
+        }
+        assert_eq!(game.outcome(), None); // centre clear before the tick-5 explosion
+        // Each Blast arm spans 256..1024 on its movement axis. Moving back
+        // one step ends exactly at 256 or 1024. Only the lower edge is inside.
+        game.step(&[actions(Some(returning), false)]).unwrap();
+        assert_eq!(
+            game.outcome(),
+            if lower_edge {
+                Some(Outcome::Defeat)
+            } else {
+                None
+            }
+        );
+        if !lower_edge {
+            let at_edge = game.character().position;
+            game.step(&[]).unwrap();
+            assert_eq!(game.character().position, at_edge);
+            assert_eq!(game.outcome(), None); // stationary body overlap is safe
+            game.step(&[actions(Some(returning), false)]).unwrap();
+            assert_eq!(game.outcome(), Some(Outcome::Defeat));
+        }
+    }
+}
+
+#[test]
+fn a_tick_130_blast_is_dangerous_on_159_but_not_during_movement_on_160() {
+    let rules = GameRules::new(192, 480).unwrap();
+    let mut game = game(
+        ".....\n.....\n.....\n.....\n.....",
+        point(640, 640),
+        rules,
+        9,
+    );
+    game.step(&[actions(None, true)]).unwrap(); // placed at 10, detonates at 130
+    game.step(&[actions(Some(Direction::Up), false)]).unwrap();
+    while game.tick() < 158 {
+        game.step(&[]).unwrap();
+    }
+    assert_eq!(game.outcome(), None);
+    assert_eq!(game.blasts()[0].expires_at(), 160);
+    assert_eq!(game.character().position, point(640, 160)); // touches the upper arm's edge
+    let mut on_159 = game.clone();
+    on_159
+        .step(&[actions(Some(Direction::Down), false)])
+        .unwrap();
+    assert_eq!(on_159.tick(), 159);
+    assert_eq!(on_159.outcome(), Some(Outcome::Defeat));
+    game.step(&[]).unwrap(); // stationary exact-edge contact remains safe on tick 159
+    game.step(&[actions(Some(Direction::Down), false)]).unwrap();
+    assert_eq!(game.tick(), 160);
+    assert_eq!(game.character().position, point(640, 640));
+    assert_eq!(game.outcome(), None);
+    assert!(game.blasts().is_empty());
+}
+
+#[test]
+fn a_diagonal_centre_cell_is_safe_despite_nearby_blast_arms() {
+    let rules = GameRules::new(192, 224)
+        .unwrap()
+        .with_bomb_parameters(2, 1, 30)
+        .unwrap();
+    let mut game = game("...\n...\n...", point(384, 384), rules, 0);
+    game.step(&[actions(None, true)]).unwrap();
+    game.step(&[actions(Some(Direction::Up), false)]).unwrap();
+    game.step(&[actions(Some(Direction::Left), false)]).unwrap();
+    assert_eq!(game.character().position, point(160, 160));
+    // Centre Cell (0,0) is diagonal to the origin, outside both adjacent arms.
+    assert_eq!(game.outcome(), None);
+    assert_eq!(game.blasts().len(), 1);
+}
+
+#[test]
+fn assistance_checks_its_correction_before_forward_travel_not_the_endpoint_chord() {
+    let rules = GameRules::new(2, 64)
+        .unwrap()
+        .with_bomb_parameters(7, 1, 30)
+        .unwrap();
+    let mut game = game(".....\n.#...\n.....", point(833, 142), rules, 0);
+    game.step(&[actions(None, true)]).unwrap(); // Bomb at (3,0)
+    for _ in 0..5 {
+        game.step(&[actions(Some(Direction::Left), false)]).unwrap();
+    }
+    for _ in 0..2 {
+        game.step(&[actions(Some(Direction::Down), false)]).unwrap();
+    }
+    assert_eq!(game.character().position, point(513, 270));
+    assert_eq!(game.outcome(), None);
+    // The Blast includes (2,0): [512,768] x [0,256], not (2,1).
+    // Left is blocked by (1,1); correction goes UP 15, then LEFT 49:
+    // (513,270) -> (513,255) -> (464,255). The bend's centre enters danger.
+    // Both tick endpoints are safe. The endpoint chord reaches y<256 only
+    // after x<468, already left of danger, so a diagonal check misses it.
+    game.step(&[actions(Some(Direction::Left), false)]).unwrap();
+    assert_eq!(game.character().position, point(464, 255));
+    assert_eq!(game.outcome(), Some(Outcome::Defeat));
+}
+
+#[test]
 fn placement_uses_the_post_movement_cell_without_snapping() {
     let mut game = game("...", point(248, 128), GameRules::default(), 0);
     game.step(&[actions(Some(Direction::Right), true)]).unwrap();
@@ -65,14 +275,19 @@ fn placement_uses_the_post_movement_cell_without_snapping() {
 
 #[test]
 fn expired_blasts_cannot_trigger_a_bomb_placed_on_the_expiry_tick() {
-    let rules = GameRules::default().with_bomb_parameters(2, 1, 4).unwrap();
-    let mut game = game("..", point(128, 128), rules, 0);
+    let rules = GameRules::new(192, 512)
+        .unwrap()
+        .with_bomb_parameters(2, 1, 4)
+        .unwrap();
+    let mut game = game(".....", point(128, 128), rules, 0);
     game.step(&[actions(None, true)]).unwrap();
-    for _ in 2..=6 {
+    game.step(&[actions(Some(Direction::Right), false)])
+        .unwrap();
+    for _ in 3..=6 {
         game.step(&[]).unwrap();
     }
     assert_eq!(game.blasts()[0].expires_at(), 7);
-    game.step(&[actions(None, true)]).unwrap();
+    game.step(&[actions(Some(Direction::Left), true)]).unwrap();
     assert!(game.blasts().is_empty());
     assert_eq!(game.bomb().unwrap().detonate_at(), 9);
 }
@@ -196,19 +411,36 @@ fn malformed_frames_and_deadline_overflow_preserve_complete_state() {
     );
     assert_eq!(placement, before);
 
-    // This failed step would move, expire the oldest Blast, place a Bomb, and
-    // immediately detonate it. Its new expiry cannot be represented: roll back all.
-    let rules = GameRules::default().with_bomb_parameters(1, 1, 3).unwrap();
-    let mut effects = game("...", point(128, 128), rules, u64::MAX - 7);
-    effects.step(&[actions(None, true)]).unwrap();
-    effects.step(&[]).unwrap();
-    effects.step(&[actions(None, true)]).unwrap();
-    effects.step(&[actions(None, true)]).unwrap();
-    assert_eq!(effects.tick(), u64::MAX - 3);
-    assert_eq!(effects.blasts().len(), 3);
+    // Escape each explosion. The rejected final step would move, expire the
+    // remaining Blast, revoke escape permission and detonate a Bomb, but its
+    // new expiry cannot be represented. All of those changes must roll back.
+    let rules = GameRules::new(192, 512)
+        .unwrap()
+        .with_bomb_parameters(1, 1, 3)
+        .unwrap();
+    let mut effects = game(
+        ".....\n.....\n.....\n.....\n.....",
+        point(640, 640),
+        rules,
+        u64::MAX - 7,
+    );
+    for command in [
+        actions(None, true),
+        actions(Some(Direction::Up), false),
+        actions(None, true),
+        actions(Some(Direction::Right), false),
+        actions(None, false),
+        actions(None, true),
+    ] {
+        effects.step(&[command]).unwrap();
+    }
+    assert_eq!(effects.outcome(), None);
+    assert_eq!(effects.tick(), u64::MAX - 1);
+    assert_eq!(effects.blasts().len(), 1);
+    assert_eq!(effects.blasts()[0].expires_at(), u64::MAX);
     let before = effects.clone();
     assert_eq!(
-        effects.step(&[actions(Some(Direction::Right), true)]),
+        effects.step(&[actions(Some(Direction::Left), true)]),
         Err(StepError::TickExhausted)
     );
     assert_eq!(effects, before);
@@ -251,7 +483,7 @@ fn clones_replay_bombs_permissions_terrain_and_effects_independently() {
     let mut sibling = initial_clone.clone();
     for frame in [
         vec![actions(Some(Direction::Up), false)],
-        vec![actions(Some(Direction::Down), true)],
+        vec![actions(Some(Direction::Right), true)],
         vec![],
         vec![],
         vec![actions(Some(Direction::Down), true)],
@@ -278,36 +510,74 @@ fn clones_replay_bombs_permissions_terrain_and_effects_independently() {
 }
 
 #[test]
-fn lingering_blasts_trigger_new_bombs_and_expire_independently() {
-    let rules = GameRules::default().with_bomb_parameters(2, 2, 4).unwrap();
-    let mut game = game(".+.", point(128, 128), rules, 0);
-    game.step(&[actions(None, true)]).unwrap();
-    for _ in 2..=3 {
-        game.step(&[]).unwrap();
+fn lingering_blasts_trigger_new_bombs_without_expanding_old_coverage() {
+    let rules = GameRules::new(192, 256)
+        .unwrap()
+        .with_bomb_parameters(2, 2, 4)
+        .unwrap();
+    let mut game = game(".+...\n.....\n.....", point(128, 128), rules, 0);
+    for command in [
+        actions(None, true),
+        actions(Some(Direction::Down), false),
+        actions(Some(Direction::Right), false),
+    ] {
+        game.step(&[command]).unwrap();
     }
+    assert_eq!(game.outcome(), None);
     assert!(game.bomb().is_none());
-    assert_eq!(game.blasts()[0].cells(), &[cell(0, 0), cell(1, 0)]);
-    assert_eq!(game.arena().terrain_at(cell(1, 0)), Some(Terrain::Floor));
-    game.step(&[actions(None, true)]).unwrap(); // tick 4: capacity freed, old Blast triggers this Bomb
-    assert!(game.bomb().is_none());
-    assert_eq!(game.blasts().len(), 2);
-    assert_eq!(game.blasts()[0].cells(), &[cell(0, 0), cell(1, 0)]); // coverage never expands
+    let old = game.blasts()[0].clone();
     assert_eq!(
-        game.blasts()[1].cells(),
-        &[cell(0, 0), cell(1, 0), cell(2, 0)]
+        old.cells(),
+        &[cell(0, 0), cell(1, 0), cell(0, 1), cell(0, 2)]
     );
+    assert_eq!(game.arena().terrain_at(cell(1, 0)), Some(Terrain::Floor));
+    game.step(&[actions(Some(Direction::Up), true)]).unwrap();
+    assert!(game.bomb().is_none()); // old Blast triggers the newly placed Bomb
+    assert_eq!(game.blasts().len(), 2);
+    assert_eq!(game.blasts()[0], old); // destroyed Block never extends old coverage
+    assert!(game.blasts()[1].cells().contains(&cell(3, 0)));
     assert_eq!(game.blasts()[1].expires_at(), 8);
-    for _ in 5..=6 {
-        game.step(&[]).unwrap();
+    assert_eq!(game.outcome(), Some(Outcome::Defeat));
+}
+
+#[test]
+fn overlapping_effects_expire_independently_while_the_player_survives() {
+    let rules = GameRules::new(192, 512)
+        .unwrap()
+        .with_bomb_parameters(1, 1, 4)
+        .unwrap();
+    let mut game = game(
+        ".....\n.....\n.....\n.....\n.....",
+        point(640, 640),
+        rules,
+        0,
+    );
+    for command in [
+        actions(None, true),
+        actions(Some(Direction::Up), false),
+        actions(None, true),
+        actions(Some(Direction::Right), false),
+    ] {
+        game.step(&[command]).unwrap();
     }
+    assert_eq!(game.blasts().len(), 2);
+    assert!(
+        game.blasts()
+            .iter()
+            .all(|blast| blast.cells().contains(&cell(2, 1)))
+    );
     game.step(&[]).unwrap();
-    assert_eq!(game.tick(), 7);
+    game.step(&[]).unwrap();
+    assert_eq!(game.tick(), 6);
     assert_eq!(game.blasts().len(), 1);
     assert_eq!(game.blasts()[0].expires_at(), 8);
+    assert!(game.blasts()[0].cells().contains(&cell(2, 1)));
+    game.step(&[]).unwrap();
     game.step(&[]).unwrap();
     assert!(game.blasts().is_empty());
+    assert_eq!(game.outcome(), None);
     game.step(&[actions(None, true)]).unwrap();
-    assert_eq!(game.bomb().unwrap().detonate_at(), 11); // a later Bomb gets a fresh fuse/permission
+    assert_eq!(game.bomb().unwrap().detonate_at(), 10);
 }
 
 #[test]
@@ -358,7 +628,10 @@ fn bomb_parameters_are_validated_and_drive_propagation_and_deadlines() {
         defaults.with_bomb_parameters(1, 1, 0),
         Err(ConstructionError::InvalidBlastLifetime)
     );
-    let rules = defaults.with_bomb_parameters(2, 3, 4).unwrap();
+    let rules = GameRules::new(192, 512)
+        .unwrap()
+        .with_bomb_parameters(2, 3, 4)
+        .unwrap();
     let mut game = game(
         "...#...\n.......\n...+...\n.......\n.......",
         point(896, 896),
@@ -367,9 +640,10 @@ fn bomb_parameters_are_validated_and_drive_propagation_and_deadlines() {
     );
     game.step(&[actions(None, true)]).unwrap();
     assert_eq!(game.bomb().unwrap().detonate_at(), 12);
-    game.step(&[]).unwrap();
+    game.step(&[actions(Some(Direction::Right), false)])
+        .unwrap();
     assert!(game.bomb().is_some());
-    game.step(&[]).unwrap();
+    game.step(&[actions(Some(Direction::Up), false)]).unwrap();
     assert_eq!(game.blasts()[0].expires_at(), 16);
     let mut cells = game.blasts()[0].cells().to_vec();
     cells.sort_by_key(|cell| (cell.row().value(), cell.column().value()));
@@ -403,8 +677,13 @@ fn detonation_and_expiry_follow_absolute_tick_deadlines() {
     game.step(&[actions(None, true)]).unwrap();
     assert_eq!(game.tick(), 10);
     assert_eq!(game.bomb().unwrap().detonate_at(), 130);
-    for _ in 11..=129 {
-        game.step(&[]).unwrap();
+    for tick in 11..=129 {
+        let movement = match tick {
+            11..=26 => Some(Direction::Right),
+            27..=42 => Some(Direction::Up),
+            _ => None,
+        };
+        game.step(&[actions(movement, false)]).unwrap();
         assert!(game.bomb().is_some());
         assert!(game.blasts().is_empty());
     }

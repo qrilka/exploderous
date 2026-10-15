@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use exploderous_core::game::{Direction, GameRules, Position, WorldX, WorldY};
+use exploderous_core::game::{Direction, GameRules, Outcome, Position, WorldX, WorldY};
 use exploderous_tui::{App, TICK_INTERVAL, TickRecord};
 
 fn point(x: i32, y: i32) -> Position {
@@ -21,9 +21,160 @@ fn release(code: KeyCode) -> KeyEvent {
 }
 
 #[test]
+fn a_reachable_loss_stops_catch_up_freezes_input_and_restarts_cleanly() {
+    let start = Instant::now();
+    for assisted in [true, false] {
+        let rules = GameRules::default().with_turn_assistance(assisted);
+        let mut app = App::new_with_rules(start, 19, 11, rules);
+        app.handle_key(press(KeyCode::Char(' ')), start);
+        for tick in 1..=119 {
+            app.advance(start + TICK_INTERVAL * tick).unwrap();
+        }
+        let now = start + TICK_INTERVAL * 119;
+        app.handle_key(press(KeyCode::Right), now);
+        app.handle_key(press(KeyCode::Char(' ')), now); // capacity rejection, not deferred
+        let ended_at = start + TICK_INTERVAL * 130;
+        let report = app.advance(ended_at).unwrap();
+        assert_eq!(report.ticks.len(), 2); // tick 121 detonates, don't finish the batch
+        assert_eq!(report.discarded_ticks, 9);
+        assert_eq!(app.game().outcome(), Some(Outcome::Defeat));
+        assert_eq!(app.game().tick(), 121);
+        assert_eq!(app.held_direction(), None);
+        assert_eq!(app.next_tick(), None);
+        let defeated = app.game().clone();
+        for code in [
+            KeyCode::Left,
+            KeyCode::Down,
+            KeyCode::Char(' '),
+            KeyCode::Char('?'),
+            KeyCode::Char('h'),
+            KeyCode::Char('H'),
+            KeyCode::Char('x'),
+        ] {
+            for kind in [
+                KeyEventKind::Press,
+                KeyEventKind::Repeat,
+                KeyEventKind::Release,
+            ] {
+                app.handle_key(key(code, kind), ended_at);
+            }
+        }
+        for code in [
+            KeyCode::Char('r'),
+            KeyCode::Char('R'),
+            KeyCode::Char('q'),
+            KeyCode::Char('Q'),
+            KeyCode::Esc,
+        ] {
+            for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
+                app.handle_key(key(code, kind), ended_at);
+            }
+        }
+        assert!(!app.help_open());
+        assert!(!app.quit_requested());
+        app.set_focused(false, ended_at);
+        app.set_terminal_size(18, 10, ended_at);
+        let resumed = start + TICK_INTERVAL * 1000;
+        app.set_focused(true, resumed);
+        app.set_terminal_size(19, 11, resumed);
+        assert_eq!(app.next_tick(), None);
+        assert!(app.advance(resumed).unwrap().ticks.is_empty());
+        assert_eq!(app.game(), &defeated);
+        app.handle_key(press(KeyCode::Char('R')), resumed);
+        assert_eq!(app.game(), App::new_with_rules(start, 19, 11, rules).game());
+        assert!(app.advance(resumed).unwrap().ticks.is_empty());
+        let report = app.advance(resumed + TICK_INTERVAL).unwrap();
+        assert_eq!(report.ticks.len(), 1);
+        assert!(!report.ticks[0].place_bomb);
+        assert_eq!(report.ticks[0].direction, None);
+        assert!(app.game().bomb().is_none());
+        // Available capacity, no permission inherited from the previous run.
+        app.handle_key(press(KeyCode::Char(' ')), resumed + TICK_INTERVAL);
+        app.advance(resumed + TICK_INTERVAL * 2).unwrap();
+        assert!(app.game().bomb().is_some());
+    }
+}
+
+#[test]
+fn the_reported_neighbouring_cell_escape_survives_but_remaining_in_danger_loses() {
+    let start = Instant::now();
+    // Minimized from the supported-terminal trace: Bomb at (5,2), player
+    // apparently beside its upper arm at (5,1), not inside its centre Cell.
+    for (escape_ticks, expected_x, outcome) in [
+        (8, 1520, Some(Outcome::Defeat)),
+        (9, 1536, None),
+        (11, 1568, None),
+    ] {
+        let mut app = App::new(start, 19, 11);
+        let mut tick = 0;
+        for (code, count) in [(KeyCode::Right, 63), (KeyCode::Down, 16)] {
+            app.handle_key(press(code), start + TICK_INTERVAL * tick);
+            for _ in 0..count {
+                tick += 1;
+                app.advance(start + TICK_INTERVAL * tick).unwrap();
+            }
+            app.handle_key(release(code), start + TICK_INTERVAL * tick);
+        }
+        app.handle_key(press(KeyCode::Char(' ')), start + TICK_INTERVAL * tick);
+        tick += 1;
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+        assert_eq!(app.game().bomb().unwrap().detonate_at(), 200);
+        for (code, count) in [(KeyCode::Up, 18), (KeyCode::Right, escape_ticks)] {
+            app.handle_key(press(code), start + TICK_INTERVAL * tick);
+            for _ in 0..count {
+                tick += 1;
+                app.advance(start + TICK_INTERVAL * tick).unwrap();
+            }
+            app.handle_key(release(code), start + TICK_INTERVAL * tick);
+        }
+        assert_eq!(app.game().character().position, point(expected_x, 352));
+        while tick < 200 {
+            tick += 1;
+            app.advance(start + TICK_INTERVAL * tick).unwrap();
+        }
+        assert_eq!(app.game().tick(), 200);
+        assert_eq!(app.game().outcome(), outcome);
+        // Blast Cell (5,1) ends at x=1536, exclusive. Centre 1520 is
+        // still in danger; 1536 and the reported 1568 draw in safe (6,1),
+        // despite positive-area body overlap with the Blast in both cases.
+        assert_eq!(app.game().character().position, point(expected_x, 352));
+        if outcome.is_none() {
+            // Remain beside the existing danger for its entire lifetime,
+            // not just safely outside its Cell on the creation tick.
+            for _ in 0..30 {
+                tick += 1;
+                app.advance(start + TICK_INTERVAL * tick).unwrap();
+                assert_eq!(app.game().outcome(), None);
+                assert_eq!(app.game().character().position, point(expected_x, 352));
+            }
+            assert!(app.game().blasts().is_empty());
+        }
+    }
+}
+
+#[test]
+fn outcome_quit_commands_act_only_on_press() {
+    let start = Instant::now();
+    let rules = GameRules::default().with_bomb_parameters(1, 1, 30).unwrap();
+    for code in [KeyCode::Char('q'), KeyCode::Char('Q'), KeyCode::Esc] {
+        let mut app = App::new_with_rules(start, 19, 11, rules);
+        app.handle_key(press(KeyCode::Char(' ')), start);
+        app.advance(start + TICK_INTERVAL * 2).unwrap();
+        assert_eq!(app.game().outcome(), Some(Outcome::Defeat));
+        app.handle_key(key(code, KeyEventKind::Repeat), start + TICK_INTERVAL * 2);
+        assert!(!app.quit_requested());
+        app.handle_key(press(code), start + TICK_INTERVAL * 2);
+        assert!(app.quit_requested());
+    }
+}
+
+#[test]
 fn one_space_press_is_consumed_once_even_across_detonation_in_a_catch_up_batch() {
     let start = Instant::now();
-    let rules = GameRules::default().with_bomb_parameters(2, 1, 1).unwrap();
+    let rules = GameRules::new(192, 512)
+        .unwrap()
+        .with_bomb_parameters(2, 1, 1)
+        .unwrap();
     let mut app = App::new_with_rules(start, 19, 11, rules);
     for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
         app.handle_key(key(KeyCode::Char(' '), kind), start);
@@ -32,6 +183,7 @@ fn one_space_press_is_consumed_once_even_across_detonation_in_a_catch_up_batch()
     assert!(!report.ticks[0].place_bomb);
     assert!(app.game().bomb().is_none());
     let now = start + TICK_INTERVAL;
+    app.handle_key(press(KeyCode::Right), now); // leave the Bomb's reach before detonation
     app.handle_key(press(KeyCode::Char(' ')), now);
     app.handle_key(release(KeyCode::Char(' ')), now); // releasing does not cancel a press
     let report = app.advance(start + TICK_INTERVAL * 6).unwrap();
@@ -59,11 +211,15 @@ fn one_space_press_is_consumed_once_even_across_detonation_in_a_catch_up_batch()
 #[test]
 fn failed_placement_is_consumed_not_deferred_until_capacity_is_free() {
     let start = Instant::now();
-    let rules = GameRules::default().with_bomb_parameters(2, 1, 1).unwrap();
+    let rules = GameRules::new(192, 512)
+        .unwrap()
+        .with_bomb_parameters(2, 1, 1)
+        .unwrap();
     let mut app = App::new_with_rules(start, 19, 11, rules);
     app.handle_key(press(KeyCode::Char(' ')), start);
     app.advance(start + TICK_INTERVAL).unwrap();
     app.handle_key(press(KeyCode::Char(' ')), start + TICK_INTERVAL);
+    app.handle_key(press(KeyCode::Right), start + TICK_INTERVAL);
     let report = app.advance(start + TICK_INTERVAL * 6).unwrap();
     assert_eq!(
         report
@@ -80,15 +236,22 @@ fn failed_placement_is_consumed_not_deferred_until_capacity_is_free() {
 #[test]
 fn every_pause_discards_placement_and_freezes_bomb_and_blast_deadlines() {
     let start = Instant::now();
-    let rules = GameRules::default().with_bomb_parameters(2, 1, 4).unwrap();
+    let rules = GameRules::new(192, 512)
+        .unwrap()
+        .with_bomb_parameters(2, 1, 4)
+        .unwrap();
     // Pause either with a live Bomb or a live Blast. Neither timers nor input leak.
     for initial_ticks in [1, 3] {
         for pause in 0..3 {
             let mut app = App::new_with_rules(start, 19, 11, rules);
             app.handle_key(press(KeyCode::Char(' ')), start);
             for tick in 1..=initial_ticks {
+                if tick == 2 {
+                    app.handle_key(press(KeyCode::Right), start + TICK_INTERVAL);
+                }
                 app.advance(start + TICK_INTERVAL * tick).unwrap();
             }
+            assert_eq!(app.game().outcome(), None);
             let snapshot = app.game().clone();
             let now = start + TICK_INTERVAL * initial_ticks;
             app.handle_key(press(KeyCode::Char(' ')), now);

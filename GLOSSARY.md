@@ -39,7 +39,7 @@ _Avoid_: Tile
 The zero-based column and row identifying one cell in an arena. It is distinct from a world-space position, which can lie between cells.
 
 **Footprint**:
-The area occupied by a character's body for movement collision and blast contact.
+The area occupied by a character's body for movement collision.
 _Avoid_: Collision body
 
 **Level**:

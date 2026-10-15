@@ -516,6 +516,14 @@ impl Rect {
             && other.top < self.bottom
     }
 
+    // Cardinal centre paths include both endpoints; Cell bounds are half-open.
+    fn intersects_centre_segment(self, start: Position, end: Position) -> bool {
+        i64::from(start.x.0.min(end.x.0)) < self.right
+            && i64::from(start.x.0.max(end.x.0)) >= self.left
+            && i64::from(start.y.0.min(end.y.0)) < self.bottom
+            && i64::from(start.y.0.max(end.y.0)) >= self.top
+    }
+
     fn footprint(position: Position, rules: GameRules) -> Self {
         let half_side = i64::from(rules.footprint_side / 2);
         Self {
@@ -527,6 +535,12 @@ impl Rect {
     }
 }
 
+/// Terminal result of a run. A new Game starts without an outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Defeat,
+}
+
 /// Complete simulation state. Equality and cloning include every authoritative field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
@@ -536,6 +550,7 @@ pub struct Game {
     rules: GameRules,
     bomb: Option<Bomb>,
     blasts: Vec<Blast>,
+    outcome: Option<Outcome>,
 }
 
 impl Game {
@@ -549,10 +564,11 @@ impl Game {
             rules: scenario.rules,
             bomb: None,
             blasts: Vec::new(),
+            outcome: None,
         }
     }
 
-    /// Advance exactly one tick; the core has no clock or persistent held input.
+    /// Advance one active tick; terminal runs remain frozen. No clock or held input.
     /// Errors preserve complete state, with priority duplicate, unknown, exhausted.
     pub fn step(&mut self, frame: &[CharacterCommand]) -> Result<(), StepError> {
         let mut identities = BTreeSet::new();
@@ -567,13 +583,23 @@ impl Game {
         {
             return Err(StepError::UnknownCharacter);
         }
+        if self.outcome.is_some() {
+            return Ok(());
+        }
         let next_tick = self.tick.checked_add(1).ok_or(StepError::TickExhausted)?;
-        let position = frame
+        let start = self.character.position;
+        let [bend, position] = frame
             .first()
             .and_then(|command| command.movement)
-            .map_or(self.character.position, |direction| {
-                self.moved_position(direction)
-            });
+            .map_or([start; 2], |direction| self.movement_path(direction));
+        let path_harmed = self.blasts.iter().any(|blast| {
+            blast.expires_at > next_tick
+                && blast.cells.iter().any(|&cell| {
+                    let danger = self.arena.cell_bounds(cell);
+                    danger.intersects_centre_segment(start, bend)
+                        || danger.intersects_centre_segment(bend, position)
+                })
+        });
         let mut bomb = self.bomb;
         if frame.first().is_some_and(|command| command.place_bomb) && bomb.is_none() {
             bomb = Some(Bomb {
@@ -621,6 +647,18 @@ impl Game {
             }
             self.blasts.push(blast);
         }
+        let final_cell = self
+            .arena
+            .cell_containing(position)
+            .expect("Character stays in Arena");
+        if path_harmed
+            || self
+                .blasts
+                .iter()
+                .any(|blast| blast.cells.contains(&final_cell))
+        {
+            self.outcome = Some(Outcome::Defeat);
+        }
         self.tick = next_tick;
         Ok(())
     }
@@ -652,12 +690,13 @@ impl Game {
         cells
     }
 
-    fn moved_position(&self, direction: Direction) -> Position {
+    // The actual perpendicular bend and final position, never speculative probes.
+    fn movement_path(&self, direction: Direction) -> [Position; 2] {
         let start = self.character.position;
         let distance = self.rules.movement_distance;
         let ordinary = self.swept_position(start, direction, distance);
         if !self.rules.turn_assistance || ordinary == start.advanced(direction, distance) {
-            return ordinary;
+            return [start, ordinary];
         }
 
         let perpendicular = match direction {
@@ -683,11 +722,14 @@ impl Game {
                 {
                     let spent = correction.min(distance);
                     let corrected = start.advanced(side, spent);
-                    return self.swept_position(corrected, direction, distance - spent);
+                    return [
+                        corrected,
+                        self.swept_position(corrected, direction, distance - spent),
+                    ];
                 }
             }
         }
-        ordinary
+        [start, ordinary]
     }
 
     fn swept_position(&self, start: Position, direction: Direction, distance: u32) -> Position {
@@ -743,6 +785,10 @@ impl Game {
             WorldX::new(i32::try_from(x).expect("movement stays within validated arena extents")),
             WorldY::new(i32::try_from(y).expect("movement stays within validated arena extents")),
         )
+    }
+
+    pub fn outcome(&self) -> Option<Outcome> {
+        self.outcome
     }
 
     pub fn tick(&self) -> u64 {

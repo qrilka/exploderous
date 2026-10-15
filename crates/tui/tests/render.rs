@@ -25,6 +25,44 @@ fn screen(terminal: &Terminal<TestBackend>) -> Vec<String> {
 }
 
 #[test]
+fn game_over_modal_overlays_the_arena_at_minimum_size_and_is_removed_on_restart() {
+    let start = Instant::now();
+    let mut app = App::new(start, 19, 11);
+    let initial = screen(&draw(&app, 19, 11));
+    app.handle_key(key(KeyCode::Char(' ')), start);
+    for tick in 1..=121 {
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    for (width, height, left, top) in [(19, 11, 0, 2), (80, 30, 30, 11)] {
+        let rows = screen(&draw(&app, width, height));
+        // Literal placement is over the middle five Arena rows, not below it.
+        // Interior spaces must erase underlying terrain, not let glyphs bleed through.
+        for (line, expected) in [
+            "┌─────────────────┐",
+            "│    GAME OVER    │",
+            "│   R: restart    │",
+            "│   Q/Esc: quit   │",
+            "└─────────────────┘",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let actual: String = rows[top + line].chars().skip(left).take(19).collect();
+            assert_eq!(actual, expected);
+        }
+        let text = rows.join("\n");
+        assert!(!text.contains("Lives:"));
+        assert!(!text.contains("Offset:"));
+    }
+    let defeated = screen(&draw(&app, 19, 11));
+    app.handle_key(key(KeyCode::Char('h')), start + TICK_INTERVAL * 121);
+    app.advance(start + TICK_INTERVAL * 1000).unwrap();
+    assert_eq!(screen(&draw(&app, 19, 11)), defeated);
+    app.handle_key(key(KeyCode::Char('r')), start + TICK_INTERVAL * 1000);
+    assert_eq!(screen(&draw(&app, 19, 11)), initial);
+}
+
+#[test]
 fn centered_map_has_one_unpadded_glyph_per_cell_and_display_only_status() {
     let app = App::new(Instant::now(), 19, 11);
     let terminal = draw(&app, 19, 11);
@@ -125,6 +163,16 @@ fn a_bomb_clears_a_passage_and_its_blast_covers_the_destroyed_block() {
     let terminal = draw(&app, 19, 11);
     assert_eq!(terminal.backend().buffer()[(7, 3)].symbol(), "●");
     assert_eq!(terminal.backend().buffer()[(8, 3)].symbol(), "▒");
+    // Get out of the left Blast arm, not just off the Bomb's origin Cell.
+    app.handle_key(key(KeyCode::Up), start + TICK_INTERVAL * tick);
+    for _ in 0..16 {
+        tick += 1;
+        app.advance(start + TICK_INTERVAL * tick).unwrap();
+    }
+    app.handle_key(
+        KeyEvent::new_with_kind(KeyCode::Up, KeyModifiers::NONE, KeyEventKind::Release),
+        start + TICK_INTERVAL * tick,
+    );
     while tick < 169 {
         tick += 1;
         app.advance(start + TICK_INTERVAL * tick).unwrap();
@@ -208,8 +256,8 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
     for entry in [
         "Arrow keys: move",
         "Space: place one Bomb; place another after it detonates",
-        "Blasts clear Blocks but are not lethal in this slice",
-        "R: reset; Q or Escape: quit",
+        "Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over",
+        "R: restart during play or Game Over; Q or Escape: quit",
         "(blank space) Floor",
         "█ Wall",
         "▒ Block",
