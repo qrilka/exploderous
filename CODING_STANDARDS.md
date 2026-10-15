@@ -14,7 +14,7 @@
 
 ## Documentation review
 
-Before editing, choose the owning document using this table. During review, check every added or changed section against that document's responsibility. Link to the owner instead of duplicating its content.
+Before editing, choose the owning document using this table. During review, check every added or changed section against that document's responsibility. Also check unchanged capability summaries affected by the delivered behavior, including README and roadmap sections; keep ticket progress in the issue tracker. Link to the owner instead of duplicating its content.
 
 | Document | Responsibility |
 | --- | --- |

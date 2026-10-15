@@ -8,16 +8,11 @@ The plan is a roadmap, not a feature specification or issue-status tracker. Deta
 
 For gameplay vocabulary, see [GLOSSARY.md](../GLOSSARY.md). The [simulation ADR](adr/0001-headless-deterministic-core.md) records the headless deterministic core decision. The [representation ADR](adr/0002-grid-terrain-and-positioned-objects.md) and game-state design define the current simulation model.
 
-## Current state
-
-The headless core and TUI support deterministic movement and collision, Bomb placement, and lingering Blasts that clear Blocks. It is not yet a complete playable Normal level: lethal hazards and the Exit objective remain future work.
-
 ## Roadmap
 
-1. **Complete a first playable Normal level.** Add the gameplay needed to place and detonate a bomb, uncover and reach the exit, handle death or victory, and explicitly restart. Resolve the slice boundaries and acceptance checks in GitHub issues before implementation.
-2. **Expand gameplay in small verified increments.** Enemies, power-ups, additional arenas, and multi-bomb mechanics are candidates, not a fixed schedule. Reprioritize as the project develops.
-3. **Add local competitive play before network play.** Introduce Battle and Versus before choosing network topology or synchronization behavior.
-4. **Evaluate other frontends and targets when concrete.** A graphical frontend, potentially Bevy, and browser support, potentially WebAssembly, remain options. Keep gameplay rules independent of presentation and transport.
+1. **Expand gameplay in small verified increments.** Enemies, power-ups, additional arenas, and multi-bomb mechanics are candidates, not a fixed schedule. Reprioritize as the project develops.
+2. **Add local competitive play before network play.** Introduce Battle and Versus before choosing network topology or synchronization behavior.
+3. **Evaluate other frontends and targets when concrete.** A graphical frontend, potentially Bevy, and browser support, potentially WebAssembly, remain options. Keep gameplay rules independent of presentation and transport.
 
 The [Bomberman ’93 manual](https://dds.konami.com/games/manual/pcemini/en_Bomber93.pdf) is one reference, not an exhaustive specification. Exploderous treats Normal, Battle, and Versus as separate gameplay presets; detailed mode rules and participant limits are settled when those capabilities are planned.
 

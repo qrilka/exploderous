@@ -2,6 +2,12 @@
 
 Keep project workflow improvements in this repository. Changes to shared skills, installed extensions, or user-wide settings require explicit approval of their global scope.
 
+## Context economy
+
+- Resolve the target, blockers, checkout state, and baseline before broad source exploration.
+- Reuse required reads while their unchanged contents remain available in context; reread after source changes or context loss.
+- Locate definitions and callers, then read complete relevant routines and tests. Bound searches and tool output to the current question; expand as dependencies emerge.
+
 ## Commit attribution
 
 Before creating a commit, read and follow `docs/agents/commit-attribution.md`.
