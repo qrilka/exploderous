@@ -130,7 +130,7 @@ Bombs are cell-anchored. Placement selects the cell containing the character's c
 
 The placing character receives passage permission for that specific bomb. Permission ends once the whole footprint clears the bomb cell, or the bomb ceases to exist. Other bombs still block movement. Permission is authoritative gameplay state included in cloning/replay, not inferred solely from the character's current centre.
 
-A newly placed bomb receives its full fuse; a live blast can trigger it immediately. Deadlines use simulation ticks, never wall-clock time. Exact fuse boundary conventions remain an open design decision.
+A newly placed bomb receives its full fuse; a live blast can trigger it immediately. Store absolute simulation-tick deadlines, never wall-clock deadlines or decrementing countdowns. A bomb placed during tick P with positive fuse F detonates during tick P + F unless triggered earlier. Placement selects the centre-containing cell after that tick's movement.
 
 Detonation removes the live bomb and produces a blast. Bomb capacity can therefore be released while the resulting blast remains dangerous. Bomb identities used by permissions must not alias a later bomb.
 
@@ -143,13 +143,23 @@ struct Blast {
 }
 ```
 
-One blast record covers a set of cells and lasts for several simulation ticks. Compute its unique, in-bounds coverage at detonation using the selected propagation rules. Coverage includes the origin and cardinal rays, respecting walls and blocks. The covered cells remain fixed for that effect's lifetime; later terrain changes do not extend an existing blast.
+One blast record covers a set of cells and lasts for several simulation ticks. Compute its unique, in-bounds coverage at detonation using the selected propagation rules. Coverage includes the origin and cardinal rays; reach counts cells beyond the origin in each direction. Walls remain unharmed and stop rays. A block is destroyed, included in the blast, and stops its ray. The covered cells remain fixed for that effect's lifetime; later terrain changes do not extend an existing blast.
 
 Each blast has its own lifetime. If A and B overlap, expiry of A must not remove B's danger. Cell danger is derived from live effect records; an independent mutable `is_on_fire` terrain flag would duplicate truth. An acceleration structure would be a derived index. Source attribution and other effect-specific state are required only by rules that depend on them.
 
-Damage uses footprint overlap, not just the centre's cell. Check the traveled path against blasts already live during movement. A blast created after movement checks the final footprint, consistent with actions preceding explosions. Exact edge contact is safe; overlap is harmful. Lifetime/expiry boundaries must be specified so movement and harm agree about which effects are live.
+Damage uses footprint overlap, not just the centre's cell. Check the traveled path against blasts already live during movement, including both actual turn-assistance segments. A blast created after movement checks the final footprint, consistent with actions preceding explosions. Exact edge contact is safe; overlap is harmful.
 
-A blast can trigger another bomb in the same tick. All propagation in that explosion phase uses the terrain present at its start: destroying a block does not open a route for a second same-phase ray. Bomb processing order must not change blast reach.
+A blast can trigger another bomb in the same tick. All propagation in that explosion phase uses the terrain present at its start: destroying a block does not open a route for a second same-phase ray. Bomb processing order must not change blast reach. Even with capacity one, an earlier lingering blast can trigger a newly placed bomb; capacity counts undetonated bombs rather than live effects.
+
+### Tick phases and deadline boundaries
+
+The tick label T denotes the resulting tick of a step advancing from T - 1. During active play, expire blasts whose deadline is T before movement, then resolve movement, placement, explosions, harm, and victory in that order. Preserve path-contact evidence for harm from blasts live during movement; a safe endpoint does not undo crossing a hazard.
+
+A blast created on tick D with positive lifetime L has an absolute expiry deadline D + L. It is dangerous on creation and through tick D + L - 1, then expires before movement on D + L. For example, a bomb placed on tick 10 with a 120-tick fuse detonates on tick 130; with a 30-tick blast lifetime, its blast is dangerous through tick 159 and gone before movement on tick 160. Initial tuning values are owned by the [first playable level spec](https://github.com/qrilka/exploderous/issues/9).
+
+Use checked addition for tick advancement and any required bomb/blast deadline. An unrepresentable deadline rejects the entire step with the existing time-exhaustion error and preserves complete state, including terrain, position, permissions, and effects. Do not wrap, saturate, or silently shorten timers. A placement blocked by ordinary capacity/occupancy rules remains a valid gameplay action, not an arithmetic failure.
+
+With one placement request per tick and capacity one, at most one bomb can detonate per tick. A finite blast lifetime therefore bounds the number of live effects without an additional smaller effect cap. Do not silently discard live hazards to enforce a storage shortcut. Multi-bomb resource policies remain separate work.
 
 ## Items and exit coexist with terrain
 
@@ -183,6 +193,14 @@ Example coexistence:
 | Two blasts sharing a floor cell | Separate coverage/lifetime records |
 
 Power-up effects, item destruction by blasts (especially newly revealed items), multiple-item policies, and simultaneous pickup conflicts remain open design decisions. They are not silently chosen by the container layout.
+
+## Level outcomes and restart
+
+The initial Normal level has one life per run. Lethal blast contact ends the run in defeat; alive centre entry into the uncovered exit ends it in victory. Harm precedes victory even if both conditions arise during the same tick.
+
+Either outcome freezes the complete simulation, including tick progression, movement, placement, and bomb/blast deadlines. A frontend stops any catch-up batch immediately when the outcome occurs. It displays a distinct outcome and accepts only restart or quit, not movement, placement, or active-play help.
+
+Restart creates a fresh run from the original scenario and selected rules: initial terrain, covered exit, character position, initial tick, active lifecycle, and available bomb capacity. It removes bombs, blasts, and escape permissions. Frontends also clear held directions, pending placement, and elapsed-time backlog; no old action or paused time leaks into the new run.
 
 ## Complete authoritative state
 
@@ -252,14 +270,14 @@ Check the complete Footprint along both observed path segments with independent 
 
 ### Other verification scope
 
-Object-interaction properties include release of bomb capacity while a blast persists, expiry of one overlapping blast, hidden item/exit reveal, escaped-bomb re-entry, paths crossing live hazards, and death before victory.
+Object-interaction properties include release of bomb capacity while a blast persists, expiry of one overlapping blast, hidden item/exit reveal, escaped-bomb re-entry, paths crossing live hazards, and death before victory. Check exact detonation/expiry boundaries, atomic deadline-overflow rejection, frozen outcome state, and complete restart restoration through whole-game stepping and read-only observations.
 
 [Kani research](../research/kani-representation-constraints.md) supports bounded vectors as well as arrays; it does not establish comparative proof cost. Construct small valid arenas through the production interface, state assumptions/dimensions/action horizons, and retain unwinding checks. Small arenas do not prove larger sizes or unbounded play; arithmetic/limit cases need separately scoped checks. Kani uses its own toolchain, not automatically the repository's Rust pin; compatibility and practical proof cost are not established by this design.
 
 ## Open design decisions
 
 - Additional movement rules for later character kinds or dynamic effects; initial movement parameters and input/errors are defined in the movement slice spec.
-- Temporal rules: fuse and blast lifetime/phase boundaries and bomb/blast resource-exhaustion behavior.
+- Bomb/blast resource policies when capacity greater than one or additional action sources are introduced; single-character, capacity-one timing and deadline-overflow rules are settled above.
 - Multi-character interactions: conflicting moves, swaps, and contact rules.
 - AI: decision ordering and random-consumption conventions.
 - Objectives and items: additional completion conditions, power-up catalog/effects, item destruction/reveal behavior, multiple-item policies, and pickup conflicts.
