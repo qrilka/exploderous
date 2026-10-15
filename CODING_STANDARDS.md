@@ -7,6 +7,11 @@
 - Use newtypes when they enforce useful constraints or prevent mixing distinct domain concepts. Do not wrap primitives without a concrete benefit.
 - Distinguish raw input from validated domain values. Check context-dependent relationships when constructing the owning aggregate, and test rejection at the constructor that owns each invariant.
 
+## Testing review
+
+- Review tests against the design's observable behavioral properties. Require independently justified expectations and identify a plausible incorrect implementation the tests reject; reference agreement and case counts alone do not establish conformance.
+- For new or expanded parameterized tests, review the purpose of each case dimension and the measured debug runtime. Reconsider unsuitable test scope before adding production complexity solely to accelerate it.
+
 ## Documentation review
 
 Before editing, choose the owning document using this table. During review, check every added or changed section against that document's responsibility. Link to the owner instead of duplicating its content.

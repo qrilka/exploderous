@@ -9,7 +9,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - If authorization or issue state is disputed, compare the session log with GitHub's current state before changing, closing, or recreating an issue. Ask if those records do not resolve the scope or authorization.
 - When the user approves behavior that differs from acceptance criteria, update the issue before treating the work as ready for review; record user-confirmed manual acceptance gates in an issue comment.
 - Commit subjects describe the change; include ticket numbers only when explicitly requested.
-- Once ticket work passes its checks and review, use `/pr` to draft the PR body. Show it to the user and get explicit approval before creating the PR; approval to implement or push is not PR approval.
+- Once ticket work passes its checks and review, use `/pr` to draft the PR body. Show the complete proposed PR title and body inline in chat before requesting approval; a questionnaire preview or file link alone is insufficient. Get explicit approval before creating the PR; approval to implement or push is not PR approval.
 
 ## Conventions
 
