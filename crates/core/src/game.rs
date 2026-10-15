@@ -150,6 +150,7 @@ pub struct Scenario {
     arena: Arena,
     character: Character,
     rules: GameRules,
+    exit: Option<CellCoord>,
 }
 
 impl Scenario {
@@ -176,7 +177,21 @@ impl Scenario {
             arena,
             character,
             rules,
+            exit: None,
         })
+    }
+
+    /// Author one Exit on Floor or beneath a Block, never outside the Arena or in a Wall.
+    /// Scenarios without an Exit have no victory objective.
+    pub fn with_exit(mut self, cell: CellCoord) -> Result<Self, ConstructionError> {
+        if !matches!(
+            self.arena.terrain_at(cell),
+            Some(Terrain::Floor | Terrain::Block)
+        ) {
+            return Err(ConstructionError::InvalidExitLocation);
+        }
+        self.exit = Some(cell);
+        Ok(self)
     }
 }
 
@@ -284,6 +299,7 @@ pub enum ConstructionError {
     InvalidBombFuse,
     InvalidBlastReach,
     InvalidBlastLifetime,
+    InvalidExitLocation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -539,6 +555,7 @@ impl Rect {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Defeat,
+    Victory,
 }
 
 /// Complete simulation state. Equality and cloning include every authoritative field.
@@ -550,6 +567,7 @@ pub struct Game {
     rules: GameRules,
     bomb: Option<Bomb>,
     blasts: Vec<Blast>,
+    exit: Option<CellCoord>,
     outcome: Option<Outcome>,
 }
 
@@ -564,6 +582,7 @@ impl Game {
             rules: scenario.rules,
             bomb: None,
             blasts: Vec::new(),
+            exit: scenario.exit,
             outcome: None,
         }
     }
@@ -658,6 +677,10 @@ impl Game {
                 .any(|blast| blast.cells.contains(&final_cell))
         {
             self.outcome = Some(Outcome::Defeat);
+        } else if self.exit == Some(final_cell)
+            && self.arena.terrain_at(final_cell) == Some(Terrain::Floor)
+        {
+            self.outcome = Some(Outcome::Victory);
         }
         self.tick = next_tick;
         Ok(())
@@ -785,6 +808,10 @@ impl Game {
             WorldX::new(i32::try_from(x).expect("movement stays within validated arena extents")),
             WorldY::new(i32::try_from(y).expect("movement stays within validated arena extents")),
         )
+    }
+
+    pub fn exit(&self) -> Option<CellCoord> {
+        self.exit
     }
 
     pub fn outcome(&self) -> Option<Outcome> {
