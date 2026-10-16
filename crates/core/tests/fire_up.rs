@@ -1,6 +1,7 @@
 use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, Column, ConstructionError, Direction,
-    Game, GameRules, Outcome, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
+    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ConstructionError,
+    ControlSource, Direction, Game, GameRules, Outcome, Position, Row, Scenario, StepError,
+    Terrain, WorldX, WorldY,
 };
 
 fn cell(column: u32, row: u32) -> CellCoord {
@@ -29,6 +30,8 @@ fn scenario(layout: &str, position: Position, rules: GameRules) -> Scenario {
         Character {
             id: CharacterId::new(0),
             position,
+            kind: CharacterKind::Bomber,
+            control: ControlSource::Human,
         },
         rules,
     )

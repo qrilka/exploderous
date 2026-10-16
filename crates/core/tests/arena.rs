@@ -1,6 +1,6 @@
 use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, Column, Direction, Game, GameRules,
-    Position, Row, Scenario, Terrain, WorldX, WorldY,
+    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ControlSource,
+    Direction, Game, GameRules, Position, Row, Scenario, Terrain, WorldX, WorldY,
 };
 
 fn point(x: i32, y: i32) -> Position {
@@ -39,6 +39,8 @@ fn classic_arena(position: Position, rules: GameRules) -> Game {
             Character {
                 id: CharacterId::new(0),
                 position,
+                kind: CharacterKind::Bomber,
+                control: ControlSource::Human,
             },
             rules,
         )

@@ -50,6 +50,54 @@ fn normal_level_has_thirteen_playable_cells_per_axis_and_a_protected_opening() {
 }
 
 #[test]
+fn authored_buroru_are_distinct_stationary_and_restored_by_restart() {
+    use exploderous_core::game::{CharacterKind, ControlSource};
+    let mut now = Instant::now();
+    let mut app = App::new(now, 19, 17);
+    let enemies = app.game().enemies().to_vec();
+    assert_eq!(enemies.len(), 3);
+    for (index, enemy) in enemies.iter().enumerate() {
+        assert_eq!(enemy.kind, CharacterKind::Buroru);
+        assert_eq!(enemy.control, ControlSource::Npc);
+        assert_ne!(enemy.id, app.game().character().id);
+        assert!(enemies[..index].iter().all(|other| other.id != enemy.id));
+    }
+    support::ticks(&mut app, &mut now, 200);
+    assert_eq!(app.game().enemies(), enemies);
+    // Centre-Cell contact ends the run, even though no Bomb was placed.
+    support::travel(&mut app, &mut now, KeyCode::Right, 128);
+    support::travel(&mut app, &mut now, KeyCode::Down, 24);
+    assert_eq!(app.game().outcome(), Some(Outcome::Defeat));
+    assert_eq!(app.game().enemies(), enemies);
+    app.handle_key(press(KeyCode::Char('r')), now);
+    assert_eq!(app.game(), App::new(now, 19, 17).game());
+}
+
+#[test]
+fn a_revealed_locked_exit_is_traversable_and_clearing_enemies_away_from_it_does_not_win() {
+    let mut now = Instant::now();
+    let mut app = App::new(now, 19, 17);
+    support::reveal_exit(&mut app, &mut now);
+    support::ticks(&mut app, &mut now, 30);
+    support::travel(&mut app, &mut now, KeyCode::Left, 16);
+    support::travel(&mut app, &mut now, KeyCode::Down, 32);
+    assert_eq!(app.game().character().position, point(1152, 640));
+    assert!(!app.game().exit_ready());
+    assert_eq!(app.game().outcome(), None);
+    support::travel(&mut app, &mut now, KeyCode::Up, 32);
+    support::travel(&mut app, &mut now, KeyCode::Right, 16);
+    support::defeat_enemies(&mut app, &mut now);
+    assert!(app.game().exit_ready());
+    assert_eq!(app.game().outcome(), None);
+    assert_eq!(app.game().current_blast_reach(), 1); // No Fire-up required.
+    app.handle_key(press(KeyCode::Char('r')), now);
+    assert_eq!(app.game(), App::new(now, 19, 17).game());
+    assert_eq!(app.game().enemies().len(), 3);
+    assert!(app.game().bomb().is_none());
+    assert!(app.game().blasts().is_empty());
+}
+
+#[test]
 fn ordinary_input_can_traverse_the_full_perimeter_without_crossing_the_exterior_frame() {
     for (width, height) in [(19, 17), (80, 30)] {
         let mut now = Instant::now();
@@ -90,10 +138,11 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
             }
             Outcome::Victory => {
                 support::reveal_exit(&mut app, &mut now);
+                support::defeat_enemies(&mut app, &mut now);
                 support::ticks(&mut app, &mut now, 30);
                 support::travel(&mut app, &mut now, KeyCode::Left, 16);
                 support::travel(&mut app, &mut now, KeyCode::Down, 22);
-                (KeyCode::Down, 271)
+                (KeyCode::Down, app.game().tick() + 2)
             }
         };
         let mut continuation = app.game().clone();
@@ -177,11 +226,13 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
             let mut now = resumed + TICK_INTERVAL * 2;
             app.handle_key(press(KeyCode::Char('r')), now);
             support::reveal_exit(&mut app, &mut now);
+            support::defeat_enemies(&mut app, &mut now);
             support::ticks(&mut app, &mut now, 30);
+            let expected_tick = app.game().tick() + 40;
             support::travel(&mut app, &mut now, KeyCode::Left, 16);
             support::travel(&mut app, &mut now, KeyCode::Down, 24);
             assert_eq!(app.game().outcome(), Some(Outcome::Victory));
-            assert_eq!(app.game().tick(), 271);
+            assert_eq!(app.game().tick(), expected_tick);
         }
     }
 }
@@ -258,6 +309,7 @@ fn outcome_quit_commands_act_only_on_press() {
             } else {
                 let mut app = App::new(now, 19, 17);
                 support::reveal_exit(&mut app, &mut now);
+                support::defeat_enemies(&mut app, &mut now);
                 support::ticks(&mut app, &mut now, 30);
                 support::travel(&mut app, &mut now, KeyCode::Left, 16);
                 support::travel(&mut app, &mut now, KeyCode::Down, 24);

@@ -85,6 +85,13 @@ fn centered_map_has_thirteen_playable_cells_inside_a_separate_frame() {
             let y = top + 1 + cell.row().value() as u16;
             let expected = if cell.column().value() == 0 && cell.row().value() == 0 {
                 "@"
+            } else if app
+                .game()
+                .enemies()
+                .iter()
+                .any(|enemy| app.game().arena().cell_containing(enemy.position) == Some(cell))
+            {
+                "e"
             } else {
                 match terrain {
                     exploderous_core::game::Terrain::Floor => " ",
@@ -212,7 +219,21 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
     assert_eq!(draw(&app, 19, 17).backend().buffer()[(7, 3)].symbol(), "│");
     assert!(!screen(&draw(&app, 19, 17)).join("\n").contains('⬚'));
     support::ticks(&mut app, &mut now, 30);
+    assert_eq!(draw(&app, 19, 17).backend().buffer()[(7, 3)].symbol(), "▧");
+    for y in [3, 5, 7] {
+        assert_eq!(draw(&app, 19, 17).backend().buffer()[(11, y)].symbol(), "e");
+    }
+    support::defeat_enemies(&mut app, &mut now);
     assert_eq!(draw(&app, 19, 17).backend().buffer()[(7, 3)].symbol(), "⬚");
+    for (width, height, left, top) in [(19, 17, 2, 0), (80, 30, 32, 6)] {
+        let terminal = draw(&app, width, height);
+        for row in [2, 4, 6] {
+            assert_eq!(
+                terminal.backend().buffer()[(left + 9, top + row + 1)].symbol(),
+                " "
+            );
+        }
+    }
     support::travel(&mut app, &mut now, KeyCode::Left, 16);
     support::travel(&mut app, &mut now, KeyCode::Down, 24);
     for (width, height, left, top) in [(19, 17, 0, 5), (80, 30, 30, 11)] {
@@ -301,7 +322,9 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "While overlapping a new Bomb, you can move toward or across it",
         "Once your whole Footprint clears the Bomb Cell, re-entry is blocked",
         "Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over",
-        "Bombs reveal an Exit hidden beneath a Block; reach its Cell alive to win",
+        "Bombs reveal an Exit hidden beneath a Block; defeat all three Buroru, then reach it alive",
+        "Buroru are stationary in this intermediate level; one Blast hit kills each",
+        "Sharing a centre Cell with a Buroru is lethal; overlapping bodies in adjacent Cells are safe",
         "Victory or Game Over freezes play; only restart or quit acts",
         "R: restart during play or either outcome; Q or Escape: quit",
         "(blank space) Floor",
@@ -312,12 +335,13 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "@ Player",
         "Offset: signed X,Y world-unit delta from the current Cell centre; 0,0 is centred",
         "a AI-controlled non-Enemy Character",
-        "e Enemy Character (takes precedence over AI)",
+        "e Buroru (stationary enemy)",
         "● Bomb",
         "┼ Blast centre",
         "│ Blast north/south arms",
         "─ Blast east/west arms",
-        "⬚ Exit",
+        "▧ Exit locked (enemies survive)",
+        "⬚ Exit ready",
         "▣ Bomb-capacity Item",
         "◈ Fire-up",
         "Collect Fire-up with your centre to add one Cell of reach to later Bombs",
@@ -333,7 +357,9 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "┼ Blast centre",
         "│ Blast north/south arms",
         "─ Blast east/west arms",
-        "⬚ Exit",
+        "▧ Exit locked",
+        "⬚ Exit ready",
+        "e Buroru",
         "◈ Fire-up",
     ] {
         assert!(live.contains(entry));
@@ -352,7 +378,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
 #[test]
 fn every_live_and_reserved_glyph_occupies_one_terminal_column() {
     for glyph in [
-        "┌", "┐", "└", "┘", "▓", "█", "▒", "@", "a", "e", "●", "┼", "│", "─", "⬚", "▣", "◈",
+        "┌", "┐", "└", "┘", "▓", "█", "▒", "@", "a", "e", "●", "┼", "│", "─", "▧", "⬚", "▣", "◈",
     ] {
         assert_eq!(UnicodeWidthStr::width(glyph), 1, "glyph={glyph}");
     }

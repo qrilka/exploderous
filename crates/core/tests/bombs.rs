@@ -1,6 +1,7 @@
 use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, Column, ConstructionError, Direction,
-    Game, GameRules, Outcome, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
+    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ConstructionError,
+    ControlSource, Direction, Game, GameRules, Outcome, Position, Row, Scenario, StepError,
+    Terrain, WorldX, WorldY,
 };
 
 const PLAYER: CharacterId = CharacterId::new(0);
@@ -35,6 +36,8 @@ fn game(layout: &str, position: Position, rules: GameRules, tick: u64) -> Game {
             Character {
                 id: PLAYER,
                 position,
+                kind: CharacterKind::Bomber,
+                control: ControlSource::Human,
             },
             rules,
         )
@@ -267,7 +270,7 @@ fn placement_uses_the_post_movement_cell_without_snapping() {
     game.step(&[actions(Some(Direction::Right), true)]).unwrap();
     assert_eq!(game.character().position, point(264, 128));
     assert_eq!(game.bomb().unwrap().cell(), cell(1, 0));
-    let bomb = *game.bomb().unwrap();
+    let bomb = game.bomb().unwrap().clone();
     game.step(&[actions(Some(Direction::Left), true)]).unwrap();
     assert_eq!(game.character().position, point(248, 128));
     assert_eq!(game.bomb(), Some(&bomb));
@@ -562,6 +565,8 @@ fn walls_blocks_and_arena_edges_bound_even_a_very_large_reach() {
             Character {
                 id: PLAYER,
                 position: point(128, 128),
+                kind: CharacterKind::Bomber,
+                control: ControlSource::Human,
             },
             rules,
         )
@@ -770,7 +775,7 @@ fn permission_ends_only_when_the_whole_footprint_leaves_the_bomb_cell() {
     game.step(&[actions(Some(Direction::Right), false)])
         .unwrap();
     assert_eq!(game.character().position, point(160, 128)); // re-entry is blocked
-    let bomb = *game.bomb().unwrap();
+    let bomb = game.bomb().unwrap().clone();
     game.step(&[actions(Some(Direction::Left), true)]).unwrap(); // full capacity is ordinary gameplay
     assert_eq!(game.character().position, point(144, 128));
     assert_eq!(game.bomb(), Some(&bomb));
