@@ -19,7 +19,6 @@ pub const MIN_WIDTH: u16 = 19;
 pub const MIN_HEIGHT: u16 = ARENA_SIZE + 4; // Exterior frame and two status rows.
 const MAX_CATCH_UP_TICKS: usize = 5;
 const ARENA_SIZE: u16 = 13;
-const STATUS: &str = "Lives: 0 | Score: 0";
 const HELP: &str = r#"NORMAL LEVEL
 
 Controls
@@ -29,6 +28,10 @@ While overlapping a new Bomb, move only away from its centre
 Once your whole Footprint clears the Bomb Cell, re-entry is blocked
 Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over
 Bombs reveal an Exit hidden beneath a Block; reach its Cell alive to win
+Reveal Fire-up beneath another Block; let the Blast expire before collecting it
+Collect Fire-up with your centre to add one Cell of reach to later Bombs
+Blast reach shows your current ability; ticking Bombs keep their old reach
+A later Blast can destroy exposed Fire-up; collecting it is not required to win
 Victory or Game Over freezes play; only restart or quit acts
 R: restart during play or either outcome; Q or Escape: quit
 ?, h, or H: open or close help
@@ -46,12 +49,12 @@ Live map: 13×13 playable Cells, plus a separate exterior frame
 │ Blast north/south arms
 ─ Blast east/west arms
 ⬚ Exit
+◈ Fire-up
 
 Reserved glyphs
 a AI-controlled non-Enemy Character
 e Enemy Character (takes precedence over AI)
-▣ Bomb-capacity Item
-◈ Blast-reach Item"#;
+▣ Bomb-capacity Item"#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TickRecord {
@@ -351,7 +354,9 @@ fn new_game(rules: GameRules) -> Game {
     )
     .expect("the fixed Level arena is valid")
     .with_exit(CellCoord::new(Column::new(4), Row::new(2)))
-    .expect("the Exit is beneath its authored Block");
+    .expect("the Exit is beneath its authored Block")
+    .with_fire_up(CellCoord::new(Column::new(2), Row::new(2)))
+    .expect("the Fire-up is beneath a different authored Block");
     Game::new(scenario, 0)
 }
 
@@ -431,6 +436,8 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
                         } else {
                             '│'
                         }
+                    } else if app.game.fire_up() == Some(cell) {
+                        '◈'
                     } else if app.game.exit() == Some(cell) {
                         '⬚'
                     } else {
@@ -467,7 +474,8 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
     frame.render_widget(
-        Paragraph::new(STATUS).alignment(Alignment::Center),
+        Paragraph::new(format!("Blast reach: {}", app.game.current_blast_reach()))
+            .alignment(Alignment::Center),
         Rect::new(area.x, top + map_height, area.width, 1),
     );
     frame.render_widget(

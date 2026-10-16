@@ -53,7 +53,7 @@ fn game_over_modal_overlays_the_arena_at_minimum_size_and_is_removed_on_restart(
             assert_eq!(actual, expected);
         }
         let text = rows.join("\n");
-        assert!(!text.contains("Lives:"));
+        assert!(!text.contains("Blast reach:"));
         assert!(!text.contains("Offset:"));
     }
     let defeated = screen(&draw(&app, 19, 17));
@@ -104,7 +104,7 @@ fn centered_map_has_thirteen_playable_cells_inside_a_separate_frame() {
             6
         );
         let rows = screen(&terminal);
-        assert_eq!(rows[usize::from(top + 15)].trim(), "Lives: 0 | Score: 0");
+        assert_eq!(rows[usize::from(top + 15)].trim(), "Blast reach: 1");
         assert_eq!(rows[usize::from(top + 16)].trim(), "Offset: +000,+000");
     }
 }
@@ -194,7 +194,7 @@ fn a_bomb_clears_a_passage_and_its_blast_covers_the_destroyed_block() {
     }
     let terminal = draw(&app, 19, 17);
     assert_eq!(terminal.backend().buffer()[(4, 3)].symbol(), " ");
-    assert_eq!(terminal.backend().buffer()[(5, 3)].symbol(), " ");
+    assert_eq!(terminal.backend().buffer()[(5, 3)].symbol(), "◈");
     app.handle_key(key(KeyCode::Char('r')), start + TICK_INTERVAL * tick);
     assert_eq!(
         screen(&draw(&app, 19, 17)),
@@ -319,7 +319,10 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "─ Blast east/west arms",
         "⬚ Exit",
         "▣ Bomb-capacity Item",
-        "◈ Blast-reach Item",
+        "◈ Fire-up",
+        "Collect Fire-up with your centre to add one Cell of reach to later Bombs",
+        "Blast reach shows your current ability; ticking Bombs keep their old reach",
+        "A later Blast can destroy exposed Fire-up; collecting it is not required to win",
     ] {
         assert!(text.contains(entry), "missing {entry:?} in:\n{text}");
     }
@@ -331,6 +334,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "│ Blast north/south arms",
         "─ Blast east/west arms",
         "⬚ Exit",
+        "◈ Fire-up",
     ] {
         assert!(live.contains(entry));
         assert!(!reserved.contains(entry));
@@ -342,7 +346,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         narrow.handle_key(key(KeyCode::Down), now);
     }
     let terminal = draw(&narrow, 19, 17);
-    assert!(screen(&terminal).join("\n").contains("◈ Blast-reach Item"));
+    assert!(screen(&terminal).join("\n").contains("◈ Fire-up"));
 }
 
 #[test]
@@ -361,6 +365,43 @@ fn undersized_terminal_shows_resize_instructions_instead_of_the_map() {
         let terminal = draw(&app, width, height);
         let text = screen(&terminal).join("\n");
         assert!(text.contains("Resize terminal"));
-        assert!(!text.contains("Lives: 0 | Score: 0"));
+        assert!(!text.contains("Blast reach:"));
+    }
+}
+
+#[test]
+fn fire_up_is_hidden_then_revealed_collected_and_shows_the_longer_blast_at_supported_sizes() {
+    for (width, height, left, top) in [(19, 17, 2, 0), (80, 30, 32, 6)] {
+        let mut now = Instant::now();
+        let mut app = App::new(now, width, height);
+        let initial = screen(&draw(&app, width, height));
+        assert!(!initial.join("\n").contains('◈'));
+        assert!(initial.join("\n").contains("Blast reach: 1"));
+        support::reveal_fire_up(&mut app, &mut now);
+        assert_eq!(
+            draw(&app, width, height).backend().buffer()[(left + 3, top + 3)].symbol(),
+            "─"
+        );
+        support::ticks(&mut app, &mut now, 30);
+        assert_eq!(
+            draw(&app, width, height).backend().buffer()[(left + 3, top + 3)].symbol(),
+            "◈"
+        );
+        support::travel(&mut app, &mut now, KeyCode::Down, 16);
+        support::travel(&mut app, &mut now, KeyCode::Right, 32);
+        let collected = screen(&draw(&app, width, height)).join("\n");
+        assert!(!collected.contains('◈'));
+        assert!(collected.contains("Blast reach: 2"));
+        app.handle_key(key(KeyCode::Char(' ')), now);
+        support::ticks(&mut app, &mut now, 1);
+        support::travel(&mut app, &mut now, KeyCode::Left, 32);
+        support::travel(&mut app, &mut now, KeyCode::Up, 16);
+        support::ticks(&mut app, &mut now, 72);
+        assert_eq!(
+            draw(&app, width, height).backend().buffer()[(left + 3, top + 1)].symbol(),
+            "│"
+        );
+        app.handle_key(key(KeyCode::Char('r')), now);
+        assert_eq!(screen(&draw(&app, width, height)), initial);
     }
 }

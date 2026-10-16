@@ -725,3 +725,53 @@ fn unknown_startup_options_are_rejected_before_terminal_initialization() {
 fn tick_interval_is_the_nominal_sixtieth_of_a_second() {
     assert_eq!(TICK_INTERVAL, Duration::from_nanos(16_666_667));
 }
+
+#[test]
+fn ordinary_input_reveals_collects_and_uses_fire_up_and_restart_restores_the_covered_item() {
+    use exploderous_core::game::Terrain;
+    let mut now = Instant::now();
+    let mut app = App::new(now, 19, 17);
+    let fresh = app.game().clone();
+    let item = app.game().fire_up().expect("one authored Fire-up");
+    assert_ne!(Some(item), app.game().exit());
+    assert_eq!(app.game().arena().terrain_at(item), Some(Terrain::Block));
+    support::reveal_fire_up(&mut app, &mut now);
+    assert_eq!(app.game().tick(), 169);
+    assert_eq!(app.game().outcome(), None);
+    assert_eq!(app.game().arena().terrain_at(item), Some(Terrain::Floor));
+    assert_eq!(app.game().fire_up(), Some(item));
+    support::ticks(&mut app, &mut now, 30);
+    support::travel(&mut app, &mut now, KeyCode::Down, 16);
+    support::travel(&mut app, &mut now, KeyCode::Right, 32);
+    assert_eq!(app.game().character().position, point(640, 640));
+    assert_eq!(app.game().fire_up(), None);
+    assert_eq!(app.game().current_blast_reach(), 2);
+    app.handle_key(press(KeyCode::Char(' ')), now);
+    support::ticks(&mut app, &mut now, 1);
+    assert_eq!(app.game().bomb().unwrap().blast_reach(), 2);
+    support::travel(&mut app, &mut now, KeyCode::Left, 32);
+    support::travel(&mut app, &mut now, KeyCode::Up, 16);
+    support::ticks(&mut app, &mut now, 72);
+    assert_eq!(app.game().outcome(), None);
+    assert!(
+        app.game().blasts()[0]
+            .cells()
+            .iter()
+            .any(|cell| cell.column().value() == 2 && cell.row().value() == 0)
+    );
+    // Reset while upgraded, with live effects, held input, pending placement and elapsed backlog.
+    app.handle_key(press(KeyCode::Right), now);
+    app.handle_key(press(KeyCode::Char(' ')), now);
+    now += TICK_INTERVAL * 100;
+    app.handle_key(press(KeyCode::Char('r')), now);
+    assert_eq!(app.game(), &fresh);
+    assert_eq!(app.held_direction(), None);
+    assert!(app.advance(now).unwrap().ticks.is_empty());
+    let report = app.advance(now + TICK_INTERVAL).unwrap();
+    assert_eq!(report.ticks.len(), 1);
+    assert_eq!(report.ticks[0].direction, None);
+    assert!(!report.ticks[0].place_bomb);
+    app.handle_key(press(KeyCode::Char(' ')), now + TICK_INTERVAL);
+    app.advance(now + TICK_INTERVAL * 2).unwrap();
+    assert_eq!(app.game().bomb().unwrap().blast_reach(), 1);
+}
