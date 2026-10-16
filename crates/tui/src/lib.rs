@@ -8,6 +8,7 @@ use exploderous_core::game::{
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
+    symbols::border,
     text::Line,
     widgets::{Block, Clear, Paragraph, Wrap},
 };
@@ -15,9 +16,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub const TICK_INTERVAL: Duration = Duration::from_nanos(16_666_667);
 pub const MIN_WIDTH: u16 = 19;
-pub const MIN_HEIGHT: u16 = 11;
+pub const MIN_HEIGHT: u16 = ARENA_SIZE + 4; // Exterior frame and two status rows.
 const MAX_CATCH_UP_TICKS: usize = 5;
-const MAP_SIZE: u16 = 9;
+const ARENA_SIZE: u16 = 13;
 const STATUS: &str = "Lives: 0 | Score: 0";
 const HELP: &str = r#"NORMAL LEVEL
 
@@ -32,9 +33,10 @@ R: restart during play or either outcome; Q or Escape: quit
 Up/Down: scroll; Escape closes help
 Offset: signed X,Y world-unit delta from the current Cell centre; 0,0 is centred
 
-Live map
+Live map: 13×13 playable Cells, plus a separate exterior frame
+▓ Exterior boundary (not terrain)
 (blank space) Floor
-█ Wall
+█ Wall pillar
 ▒ Block
 @ Player
 ● Bomb
@@ -313,24 +315,19 @@ fn direction(code: KeyCode) -> Option<Direction> {
 
 fn new_game(rules: GameRules) -> Game {
     let blocks = [
-        CellCoord::new(Column::new(3), Row::new(3)),
-        CellCoord::new(Column::new(5), Row::new(3)),
-        CellCoord::new(Column::new(7), Row::new(3)),
-        CellCoord::new(Column::new(3), Row::new(5)),
-        CellCoord::new(Column::new(7), Row::new(5)),
-        CellCoord::new(Column::new(5), Row::new(7)),
+        CellCoord::new(Column::new(2), Row::new(2)),
+        CellCoord::new(Column::new(4), Row::new(2)),
+        CellCoord::new(Column::new(6), Row::new(2)),
+        CellCoord::new(Column::new(2), Row::new(4)),
+        CellCoord::new(Column::new(6), Row::new(4)),
+        CellCoord::new(Column::new(4), Row::new(6)),
     ];
-    let terrain = (0..9_u32)
+    let terrain = (0..u32::from(ARENA_SIZE))
         .flat_map(|row| {
             let blocks = &blocks;
-            (0..9_u32).map(move |column| {
+            (0..u32::from(ARENA_SIZE)).map(move |column| {
                 let cell = CellCoord::new(Column::new(column), Row::new(row));
-                if row == 0
-                    || row == 8
-                    || column == 0
-                    || column == 8
-                    || (row.is_multiple_of(2) && column.is_multiple_of(2))
-                {
+                if row % 2 == 1 && column % 2 == 1 {
                     Terrain::Wall
                 } else if blocks.contains(&cell) {
                     Terrain::Block
@@ -341,17 +338,17 @@ fn new_game(rules: GameRules) -> Game {
         })
         .collect();
     let scenario = Scenario::new(
-        9,
-        9,
+        u32::from(ARENA_SIZE),
+        u32::from(ARENA_SIZE),
         terrain,
         Character {
             id: CharacterId::new(0),
-            position: Position::new(WorldX::new(384), WorldY::new(384)),
+            position: Position::new(WorldX::new(128), WorldY::new(128)),
         },
         rules,
     )
     .expect("the fixed Level arena is valid")
-    .with_exit(CellCoord::new(Column::new(5), Row::new(3)))
+    .with_exit(CellCoord::new(Column::new(4), Row::new(2)))
     .expect("the Exit is beneath its authored Block");
     Game::new(scenario, 0)
 }
@@ -360,9 +357,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
     if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
         frame.render_widget(
-            Paragraph::new("Resize terminal to at least 19 columns × 11 rows.")
-                .alignment(Alignment::Center)
-                .wrap(Wrap { trim: true }),
+            Paragraph::new(format!(
+                "Resize terminal to at least {MIN_WIDTH} columns × {MIN_HEIGHT} rows."
+            ))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
             area,
         );
     } else if app.help_open {
@@ -373,9 +372,28 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 fn render_game(frame: &mut Frame, app: &App, area: Rect) {
-    let map_x = area.x + (area.width - MAP_SIZE) / 2;
-    let top = area.y + (area.height - MIN_HEIGHT) / 2;
     let arena = app.game.arena();
+    let map_width = arena.width() as u16 + 2;
+    let map_height = arena.height() as u16 + 2;
+    let top = area.y + (area.height - map_height - 2) / 2;
+    let map_area = Rect::new(
+        area.x + (area.width - map_width) / 2,
+        top,
+        map_width,
+        map_height,
+    );
+    let boundary = Block::bordered().border_set(border::Set {
+        top_left: "▓",
+        top_right: "▓",
+        bottom_left: "▓",
+        bottom_right: "▓",
+        vertical_left: "▓",
+        vertical_right: "▓",
+        horizontal_top: "▓",
+        horizontal_bottom: "▓",
+    });
+    let interior = boundary.inner(map_area);
+    frame.render_widget(boundary, map_area);
     let position = app.game.character().position;
     let character_cell = arena
         .cell_containing(position)
@@ -425,16 +443,18 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
             map.push('\n');
         }
     }
-    frame.render_widget(
-        Paragraph::new(map),
-        Rect::new(map_x, top, MAP_SIZE, MAP_SIZE),
-    );
+    frame.render_widget(Paragraph::new(map), interior);
     if let Some(outcome) = app.game.outcome() {
         let message = match outcome {
             Outcome::Defeat => "GAME OVER",
             Outcome::Victory => "VICTORY!",
         };
-        let modal = Rect::new(area.x + (area.width - MIN_WIDTH) / 2, top + 2, MIN_WIDTH, 5);
+        let modal = Rect::new(
+            area.x + (area.width - MIN_WIDTH) / 2,
+            top + (map_height - 5) / 2,
+            MIN_WIDTH,
+            5,
+        );
         frame.render_widget(Clear, modal);
         frame.render_widget(
             Paragraph::new(format!("{message}\nR: restart\nQ/Esc: quit"))
@@ -446,11 +466,11 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
     }
     frame.render_widget(
         Paragraph::new(STATUS).alignment(Alignment::Center),
-        Rect::new(area.x, top + MAP_SIZE, area.width, 1),
+        Rect::new(area.x, top + map_height, area.width, 1),
     );
     frame.render_widget(
         Paragraph::new(offset).alignment(Alignment::Center),
-        Rect::new(area.x, top + MAP_SIZE + 1, area.width, 1),
+        Rect::new(area.x, top + map_height + 1, area.width, 1),
     );
 }
 

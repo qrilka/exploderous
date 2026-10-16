@@ -25,6 +25,52 @@ fn release(code: KeyCode) -> KeyEvent {
 }
 
 #[test]
+fn normal_level_has_thirteen_playable_cells_per_axis_and_a_protected_opening() {
+    use exploderous_core::game::{CellCoord, Column, Row, Terrain};
+
+    let app = App::new(Instant::now(), 19, 17);
+    let arena = app.game().arena();
+    assert_eq!((arena.width(), arena.height()), (13, 13));
+    assert_eq!(arena.cells().count(), 169);
+    assert_eq!(app.game().character().position, point(128, 128));
+    for (cell, terrain) in arena.cells() {
+        let pillar = cell.column().value() % 2 == 1 && cell.row().value() % 2 == 1;
+        assert_eq!(terrain == Terrain::Wall, pillar, "cell={cell:?}");
+    }
+    for (column, row) in [(0, 0), (1, 0), (2, 0), (0, 1), (0, 2)] {
+        assert_eq!(
+            arena.terrain_at(CellCoord::new(Column::new(column), Row::new(row))),
+            Some(Terrain::Floor)
+        );
+    }
+    assert_eq!(
+        arena.terrain_at(app.game().exit().expect("authored Exit is retained")),
+        Some(Terrain::Block)
+    );
+}
+
+#[test]
+fn ordinary_input_can_traverse_the_full_perimeter_without_crossing_the_exterior_frame() {
+    for (width, height) in [(19, 17), (80, 30)] {
+        let mut now = Instant::now();
+        let mut app = App::new(now, width, height);
+        // 256 ticks exceeds the full thirteen-Cell extent. A ring of Walls, an
+        // eleven-Cell interior, or centre-only bounds would stop at different positions.
+        for (direction, expected) in [
+            (KeyCode::Right, point(3232, 128)),
+            (KeyCode::Down, point(3232, 3232)),
+            (KeyCode::Left, point(96, 3232)),
+            (KeyCode::Up, point(96, 96)),
+        ] {
+            support::travel(&mut app, &mut now, direction, 256);
+            assert_eq!(app.game().character().position, expected);
+            assert_eq!(app.game().outcome(), None);
+        }
+        assert_eq!(app.game().tick(), 1024);
+    }
+}
+
+#[test]
 fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
     let start = Instant::now();
     for (assisted, outcome) in [
@@ -34,7 +80,7 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
         (false, Outcome::Victory),
     ] {
         let rules = GameRules::default().with_turn_assistance(assisted);
-        let mut app = App::new_with_rules(start, 19, 11, rules);
+        let mut app = App::new_with_rules(start, 19, 17, rules);
         let mut now = start;
         let (direction, terminal_tick) = match outcome {
             Outcome::Defeat => {
@@ -107,15 +153,15 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
         assert!(!app.help_open());
         assert!(!app.quit_requested());
         app.set_focused(false, ended_at);
-        app.set_terminal_size(18, 10, ended_at);
+        app.set_terminal_size(19, 16, ended_at);
         let resumed = start + TICK_INTERVAL * 1000;
         app.set_focused(true, resumed);
-        app.set_terminal_size(19, 11, resumed);
+        app.set_terminal_size(19, 17, resumed);
         assert_eq!(app.next_tick(), None);
         assert!(app.advance(resumed).unwrap().ticks.is_empty());
         assert_eq!(app.game(), &defeated);
         app.handle_key(press(KeyCode::Char('R')), resumed);
-        assert_eq!(app.game(), App::new_with_rules(start, 19, 11, rules).game());
+        assert_eq!(app.game(), App::new_with_rules(start, 19, 17, rules).game());
         assert!(app.advance(resumed).unwrap().ticks.is_empty());
         let report = app.advance(resumed + TICK_INTERVAL).unwrap();
         assert_eq!(report.ticks.len(), 1);
@@ -143,14 +189,14 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
 #[test]
 fn the_reported_neighbouring_cell_escape_survives_but_remaining_in_danger_loses() {
     let start = Instant::now();
-    // Minimized from the supported-terminal trace: Bomb at (5,2), player
-    // apparently beside its upper arm at (5,1), not inside its centre Cell.
+    // Original supported-terminal trace translated one Cell up/left: Bomb at
+    // (4,1), player apparently beside its upper arm at (4,0).
     for (escape_ticks, expected_x, outcome) in [
-        (8, 1520, Some(Outcome::Defeat)),
-        (9, 1536, None),
-        (11, 1568, None),
+        (8, 1264, Some(Outcome::Defeat)),
+        (9, 1280, None),
+        (11, 1312, None),
     ] {
-        let mut app = App::new(start, 19, 11);
+        let mut app = App::new(start, 19, 17);
         let mut tick = 0;
         for (code, count) in [(KeyCode::Right, 63), (KeyCode::Down, 16)] {
             app.handle_key(press(code), start + TICK_INTERVAL * tick);
@@ -172,17 +218,17 @@ fn the_reported_neighbouring_cell_escape_survives_but_remaining_in_danger_loses(
             }
             app.handle_key(release(code), start + TICK_INTERVAL * tick);
         }
-        assert_eq!(app.game().character().position, point(expected_x, 352));
+        assert_eq!(app.game().character().position, point(expected_x, 96));
         while tick < 200 {
             tick += 1;
             app.advance(start + TICK_INTERVAL * tick).unwrap();
         }
         assert_eq!(app.game().tick(), 200);
         assert_eq!(app.game().outcome(), outcome);
-        // Blast Cell (5,1) ends at x=1536, exclusive. Centre 1520 is
-        // still in danger; 1536 and the reported 1568 draw in safe (6,1),
+        // Blast Cell (4,0) ends at x=1280, exclusive. Centre 1264 is
+        // still in danger; 1280 and the translated 1312 draw in safe (5,0),
         // despite positive-area body overlap with the Blast in both cases.
-        assert_eq!(app.game().character().position, point(expected_x, 352));
+        assert_eq!(app.game().character().position, point(expected_x, 96));
         if outcome.is_none() {
             // Remain beside the existing danger for its entire lifetime,
             // not just safely outside its Cell on the creation tick.
@@ -190,7 +236,7 @@ fn the_reported_neighbouring_cell_escape_survives_but_remaining_in_danger_loses(
                 tick += 1;
                 app.advance(start + TICK_INTERVAL * tick).unwrap();
                 assert_eq!(app.game().outcome(), None);
-                assert_eq!(app.game().character().position, point(expected_x, 352));
+                assert_eq!(app.game().character().position, point(expected_x, 96));
             }
             assert!(app.game().blasts().is_empty());
         }
@@ -205,12 +251,12 @@ fn outcome_quit_commands_act_only_on_press() {
         for code in [KeyCode::Char('q'), KeyCode::Char('Q'), KeyCode::Esc] {
             let mut now = start;
             let mut app = if outcome == Outcome::Defeat {
-                let mut app = App::new_with_rules(now, 19, 11, rules);
+                let mut app = App::new_with_rules(now, 19, 17, rules);
                 app.handle_key(press(KeyCode::Char(' ')), now);
                 support::ticks(&mut app, &mut now, 2);
                 app
             } else {
-                let mut app = App::new(now, 19, 11);
+                let mut app = App::new(now, 19, 17);
                 support::reveal_exit(&mut app, &mut now);
                 support::ticks(&mut app, &mut now, 30);
                 support::travel(&mut app, &mut now, KeyCode::Left, 16);
@@ -233,7 +279,7 @@ fn one_space_press_is_consumed_once_even_across_detonation_in_a_catch_up_batch()
         .unwrap()
         .with_bomb_parameters(2, 1, 1)
         .unwrap();
-    let mut app = App::new_with_rules(start, 19, 11, rules);
+    let mut app = App::new_with_rules(start, 19, 17, rules);
     for kind in [KeyEventKind::Repeat, KeyEventKind::Release] {
         app.handle_key(key(KeyCode::Char(' '), kind), start);
     }
@@ -273,7 +319,7 @@ fn failed_placement_is_consumed_not_deferred_until_capacity_is_free() {
         .unwrap()
         .with_bomb_parameters(2, 1, 1)
         .unwrap();
-    let mut app = App::new_with_rules(start, 19, 11, rules);
+    let mut app = App::new_with_rules(start, 19, 17, rules);
     app.handle_key(press(KeyCode::Char(' ')), start);
     app.advance(start + TICK_INTERVAL).unwrap();
     app.handle_key(press(KeyCode::Char(' ')), start + TICK_INTERVAL);
@@ -301,7 +347,7 @@ fn every_pause_discards_placement_and_freezes_bomb_and_blast_deadlines() {
     // Pause either with a live Bomb or a live Blast. Neither timers nor input leak.
     for initial_ticks in [1, 3] {
         for pause in 0..3 {
-            let mut app = App::new_with_rules(start, 19, 11, rules);
+            let mut app = App::new_with_rules(start, 19, 17, rules);
             app.handle_key(press(KeyCode::Char(' ')), start);
             for tick in 1..=initial_ticks {
                 if tick == 2 {
@@ -316,7 +362,7 @@ fn every_pause_discards_placement_and_freezes_bomb_and_blast_deadlines() {
             match pause {
                 0 => app.handle_key(press(KeyCode::Char('h')), now),
                 1 => app.set_focused(false, now),
-                _ => app.set_terminal_size(18, 10, now),
+                _ => app.set_terminal_size(18, 17, now),
             }
             app.handle_key(press(KeyCode::Char(' ')), now);
             let resumed = start + TICK_INTERVAL * 1000;
@@ -325,7 +371,7 @@ fn every_pause_discards_placement_and_freezes_bomb_and_blast_deadlines() {
             match pause {
                 0 => app.handle_key(press(KeyCode::Esc), resumed),
                 1 => app.set_focused(true, resumed),
-                _ => app.set_terminal_size(19, 11, resumed),
+                _ => app.set_terminal_size(19, 17, resumed),
             }
             assert!(app.advance(resumed).unwrap().ticks.is_empty());
             let report = app.advance(resumed + TICK_INTERVAL).unwrap();
@@ -345,13 +391,13 @@ fn reset_and_quit_discard_pending_actions_with_live_bombs() {
         .with_turn_assistance(false)
         .with_bomb_parameters(2, 2, 4)
         .unwrap();
-    let mut app = App::new_with_rules(start, 19, 11, rules);
+    let mut app = App::new_with_rules(start, 19, 17, rules);
     app.handle_key(press(KeyCode::Char(' ')), start);
     app.handle_key(press(KeyCode::Right), start);
     app.advance(start + TICK_INTERVAL).unwrap();
     app.handle_key(press(KeyCode::Char(' ')), start + TICK_INTERVAL);
     app.handle_key(press(KeyCode::Char('r')), start + TICK_INTERVAL * 100);
-    let fresh = App::new_with_rules(start, 19, 11, rules);
+    let fresh = App::new_with_rules(start, 19, 17, rules);
     assert_eq!(app.game(), fresh.game());
     let report = app.advance(start + TICK_INTERVAL * 101).unwrap();
     assert_eq!(report.ticks.len(), 1);
@@ -377,21 +423,21 @@ fn reset_and_quit_discard_pending_actions_with_live_bombs() {
 #[test]
 fn space_places_a_bomb_after_movement_on_the_next_tick() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
     app.handle_key(press(KeyCode::Char(' ')), start);
     app.advance(start + TICK_INTERVAL).unwrap();
-    assert_eq!(app.game().character().position, point(400, 384));
+    assert_eq!(app.game().character().position, point(144, 128));
     let bomb = app.game().bomb().expect("Space placed a Bomb");
-    assert_eq!(bomb.cell().column().value(), 1);
-    assert_eq!(bomb.cell().row().value(), 1);
+    assert_eq!(bomb.cell().column().value(), 0);
+    assert_eq!(bomb.cell().row().value(), 0);
     assert_eq!(bomb.detonate_at(), 121);
 }
 
 #[test]
 fn the_most_recent_held_direction_wins_and_release_restores_the_previous_one() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
     app.handle_key(press(KeyCode::Down), start);
     assert_eq!(app.held_direction(), Some(Direction::Down));
@@ -399,19 +445,19 @@ fn the_most_recent_held_direction_wins_and_release_restores_the_previous_one() {
     app.handle_key(release(KeyCode::Down), start);
     assert_eq!(app.held_direction(), Some(Direction::Right));
     assert_eq!(app.advance(start + TICK_INTERVAL).unwrap().ticks.len(), 1);
-    assert_eq!(app.game().character().position, point(400, 384));
+    assert_eq!(app.game().character().position, point(144, 128));
 }
 
 #[test]
 fn every_arrow_key_maps_to_its_cardinal_movement() {
     let start = Instant::now();
     for (code, expected) in [
-        (KeyCode::Up, point(384, 368)),
-        (KeyCode::Right, point(400, 384)),
-        (KeyCode::Down, point(384, 400)),
-        (KeyCode::Left, point(368, 384)),
+        (KeyCode::Up, point(128, 112)),
+        (KeyCode::Right, point(144, 128)),
+        (KeyCode::Down, point(128, 144)),
+        (KeyCode::Left, point(112, 128)),
     ] {
-        let mut app = App::new(start, 19, 11);
+        let mut app = App::new(start, 19, 17);
         app.handle_key(press(code), start);
         app.advance(start + TICK_INTERVAL).unwrap();
         assert_eq!(app.game().character().position, expected, "key={code:?}");
@@ -421,7 +467,7 @@ fn every_arrow_key_maps_to_its_cardinal_movement() {
 #[test]
 fn a_release_stops_future_tick_records_after_a_short_direction_press() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Down), start);
     let first_tick = app.advance(start + TICK_INTERVAL).unwrap();
     assert_eq!(
@@ -430,7 +476,7 @@ fn a_release_stops_future_tick_records_after_a_short_direction_press() {
             tick: 1,
             direction: Some(Direction::Down),
             place_bomb: false,
-            position: point(384, 400),
+            position: point(128, 144),
         }]
     );
 
@@ -442,21 +488,21 @@ fn a_release_stops_future_tick_records_after_a_short_direction_press() {
         after_release
             .ticks
             .iter()
-            .all(|tick| { tick.direction.is_none() && tick.position == point(384, 400) })
+            .all(|tick| { tick.direction.is_none() && tick.position == point(128, 144) })
     );
 }
 
 #[test]
 fn repeat_events_do_not_change_held_precedence_or_trigger_actions() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
     app.handle_key(key(KeyCode::Up, KeyEventKind::Repeat), start);
     app.handle_key(key(KeyCode::Char('q'), KeyEventKind::Repeat), start);
     assert_eq!(app.held_direction(), Some(Direction::Right));
     assert!(!app.quit_requested());
 
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
     app.handle_key(key(KeyCode::Char('r'), KeyEventKind::Repeat), start);
     assert_eq!(app.held_direction(), Some(Direction::Right));
@@ -466,34 +512,34 @@ fn repeat_events_do_not_change_held_precedence_or_trigger_actions() {
 #[test]
 fn reset_recreates_the_game_and_discards_held_input_and_tick_backlog() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
     app.advance(start + TICK_INTERVAL).unwrap();
     let reset_at = start + TICK_INTERVAL * 10;
     app.handle_key(press(KeyCode::Char('R')), reset_at);
 
     assert_eq!(app.game().tick(), 0);
-    assert_eq!(app.game().character().position, point(384, 384));
+    assert_eq!(app.game().character().position, point(128, 128));
     assert_eq!(app.held_direction(), None);
     assert_eq!(app.advance(reset_at).unwrap().ticks.len(), 0);
     assert_eq!(
         app.advance(reset_at + TICK_INTERVAL).unwrap().ticks.len(),
         1
     );
-    assert_eq!(app.game().character().position, point(384, 384));
+    assert_eq!(app.game().character().position, point(128, 128));
 }
 
 #[test]
 fn catch_up_processes_five_ticks_and_discards_the_remaining_backlog() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
 
     let report = app.advance(start + TICK_INTERVAL * 10).unwrap();
     assert_eq!(report.ticks.len(), 5);
     assert_eq!(report.discarded_ticks, 5);
     assert_eq!(app.game().tick(), 5);
-    assert_eq!(app.game().character().position, point(464, 384));
+    assert_eq!(app.game().character().position, point(208, 128));
     assert_eq!(
         app.advance(start + TICK_INTERVAL * 10).unwrap().ticks.len(),
         0
@@ -504,10 +550,10 @@ fn catch_up_processes_five_ticks_and_discards_the_remaining_backlog() {
 #[test]
 fn resize_pause_clears_input_and_resume_starts_without_backlog() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
     let paused_at = start + TICK_INTERVAL;
-    app.set_terminal_size(18, 10, paused_at);
+    app.set_terminal_size(19, 16, paused_at);
     assert_eq!(app.held_direction(), None);
     assert_eq!(
         app.advance(start + TICK_INTERVAL * 100)
@@ -518,19 +564,19 @@ fn resize_pause_clears_input_and_resume_starts_without_backlog() {
     );
 
     let resumed_at = start + TICK_INTERVAL * 100;
-    app.set_terminal_size(19, 11, resumed_at);
+    app.set_terminal_size(19, 17, resumed_at);
     assert_eq!(app.advance(resumed_at).unwrap().ticks.len(), 0);
     assert_eq!(
         app.advance(resumed_at + TICK_INTERVAL).unwrap().ticks.len(),
         1
     );
-    assert_eq!(app.game().character().position, point(384, 384));
+    assert_eq!(app.game().character().position, point(128, 128));
 }
 
 #[test]
 fn help_pauses_movement_and_ignores_reset_and_quit_until_closed() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
     app.handle_key(press(KeyCode::Char('?')), start);
     assert!(app.help_open());
@@ -549,7 +595,7 @@ fn help_pauses_movement_and_ignores_reset_and_quit_until_closed() {
 #[test]
 fn focus_pause_clears_input_and_resumes_idle() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     app.handle_key(press(KeyCode::Right), start);
     app.set_focused(false, start + TICK_INTERVAL);
     assert_eq!(app.held_direction(), None);
@@ -565,15 +611,15 @@ fn focus_pause_clears_input_and_resumes_idle() {
         app.advance(resumed_at + TICK_INTERVAL).unwrap().ticks.len(),
         1
     );
-    assert_eq!(app.game().character().position, point(384, 384));
+    assert_eq!(app.game().character().position, point(128, 128));
 }
 
 #[test]
 fn assisted_and_strict_rules_drive_turns_and_survive_reset() {
     let start = Instant::now();
-    for (assisted, expected) in [(true, point(432, 416)), (false, point(416, 448))] {
+    for (assisted, expected) in [(true, point(176, 160)), (false, point(160, 192))] {
         let rules = GameRules::default().with_turn_assistance(assisted);
-        let mut app = App::new_with_rules(start, 19, 11, rules);
+        let mut app = App::new_with_rules(start, 19, 17, rules);
         app.handle_key(press(KeyCode::Down), start);
         for tick in 1..=4 {
             app.advance(start + TICK_INTERVAL * tick).unwrap();
@@ -589,7 +635,7 @@ fn assisted_and_strict_rules_drive_turns_and_survive_reset() {
         app.advance(start + TICK_INTERVAL * 10).unwrap();
         assert_eq!(app.game().character().position, expected);
         app.handle_key(press(KeyCode::Char('r')), start + TICK_INTERVAL * 10);
-        assert_eq!(app.game().character().position, point(384, 384));
+        assert_eq!(app.game().character().position, point(128, 128));
         assert_eq!(app.game().rules(), &rules);
     }
 }
@@ -597,7 +643,7 @@ fn assisted_and_strict_rules_drive_turns_and_survive_reset() {
 #[test]
 fn a_turn_past_a_cell_boundary_corrects_safely_and_release_stops_correction() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 11);
+    let mut app = App::new(start, 19, 17);
     let mut tick = 0;
     // Approach the upper pillar: the old lower route now has an authored Block.
     for (code, ticks) in [(KeyCode::Right, 30), (KeyCode::Down, 9)] {
@@ -608,24 +654,24 @@ fn a_turn_past_a_cell_boundary_corrects_safely_and_release_stops_correction() {
         }
         app.handle_key(release(code), start + TICK_INTERVAL * tick);
     }
-    assert_eq!(app.game().character().position, point(864, 528));
+    assert_eq!(app.game().character().position, point(608, 272));
     app.handle_key(press(KeyCode::Left), start + TICK_INTERVAL * tick);
     tick += 1;
     app.advance(start + TICK_INTERVAL * tick).unwrap();
-    assert_eq!(app.game().character().position, point(864, 512));
+    assert_eq!(app.game().character().position, point(608, 256));
     app.handle_key(release(KeyCode::Left), start + TICK_INTERVAL * tick);
     tick += 1;
     app.advance(start + TICK_INTERVAL * tick).unwrap();
-    assert_eq!(app.game().character().position, point(864, 512));
+    assert_eq!(app.game().character().position, point(608, 256));
     app.handle_key(press(KeyCode::Left), start + TICK_INTERVAL * tick);
     for _ in 0..6 {
         tick += 1;
         app.advance(start + TICK_INTERVAL * tick).unwrap();
     }
-    assert_eq!(app.game().character().position, point(864, 416));
+    assert_eq!(app.game().character().position, point(608, 160));
     tick += 1;
     app.advance(start + TICK_INTERVAL * tick).unwrap();
-    assert_eq!(app.game().character().position, point(848, 416));
+    assert_eq!(app.game().character().position, point(592, 160));
 }
 
 #[test]
