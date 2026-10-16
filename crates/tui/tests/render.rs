@@ -220,10 +220,25 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
     assert!(!screen(&draw(&app, 19, 17)).join("\n").contains('⬚'));
     support::ticks(&mut app, &mut now, 30);
     assert_eq!(draw(&app, 19, 17).backend().buffer()[(7, 3)].symbol(), "▧");
-    for y in [3, 5, 7] {
-        assert_eq!(draw(&app, 19, 17).backend().buffer()[(11, y)].symbol(), "e");
+    let enemy_cells: Vec<_> = app
+        .game()
+        .enemies()
+        .iter()
+        .map(|enemy| app.game().arena().cell_containing(enemy.position).unwrap())
+        .collect();
+    for cell in enemy_cells {
+        assert_eq!(
+            draw(&app, 19, 17).backend().buffer()[(
+                3 + cell.column().value() as u16,
+                1 + cell.row().value() as u16
+            )]
+                .symbol(),
+            "e"
+        );
     }
-    support::defeat_enemies(&mut app, &mut now);
+    let rules = support::objective_rules(true);
+    let mut app = App::new_with_rules(now, 19, 17, rules);
+    support::prepare_ready_exit(&mut app, &mut now);
     assert_eq!(draw(&app, 19, 17).backend().buffer()[(7, 3)].symbol(), "⬚");
     for (width, height, left, top) in [(19, 17, 2, 0), (80, 30, 32, 6)] {
         let terminal = draw(&app, width, height);
@@ -234,8 +249,8 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
             );
         }
     }
-    support::travel(&mut app, &mut now, KeyCode::Left, 16);
-    support::travel(&mut app, &mut now, KeyCode::Down, 24);
+    support::travel(&mut app, &mut now, KeyCode::Left, 2);
+    support::travel(&mut app, &mut now, KeyCode::Down, 2);
     for (width, height, left, top) in [(19, 17, 0, 5), (80, 30, 30, 11)] {
         let rows = screen(&draw(&app, width, height));
         for (line, expected) in [
@@ -266,7 +281,7 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
     app.handle_key(key(KeyCode::Char('r')), now);
     assert_eq!(
         screen(&draw(&app, 19, 17)),
-        screen(&draw(&App::new(now, 19, 17), 19, 17))
+        screen(&draw(&App::new_with_rules(now, 19, 17, rules), 19, 17))
     );
 }
 
@@ -323,7 +338,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "Once your whole Footprint clears the Bomb Cell, re-entry is blocked",
         "Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over",
         "Bombs reveal an Exit hidden beneath a Block; defeat all three Buroru, then reach it alive",
-        "Buroru are stationary in this intermediate level; one Blast hit kills each",
+        "Buroru wander at half player speed; one Blast hit kills each",
         "Sharing a centre Cell with a Buroru is lethal; overlapping bodies in adjacent Cells are safe",
         "Victory or Game Over freezes play; only restart or quit acts",
         "R: restart during play or either outcome; Q or Escape: quit",
@@ -335,7 +350,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "@ Player",
         "Offset: signed X,Y world-unit delta from the current Cell centre; 0,0 is centred",
         "a AI-controlled non-Enemy Character",
-        "e Buroru (stationary enemy)",
+        "e Buroru (wandering enemy)",
         "● Bomb",
         "┼ Blast centre",
         "│ Blast north/south arms",

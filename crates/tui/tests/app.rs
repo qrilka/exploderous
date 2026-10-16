@@ -50,7 +50,7 @@ fn normal_level_has_thirteen_playable_cells_per_axis_and_a_protected_opening() {
 }
 
 #[test]
-fn authored_buroru_are_distinct_stationary_and_restored_by_restart() {
+fn authored_buroru_wander_on_idle_ticks_pause_completely_and_restart_reproducibly() {
     use exploderous_core::game::{CharacterKind, ControlSource};
     let mut now = Instant::now();
     let mut app = App::new(now, 19, 17);
@@ -62,13 +62,18 @@ fn authored_buroru_are_distinct_stationary_and_restored_by_restart() {
         assert_ne!(enemy.id, app.game().character().id);
         assert!(enemies[..index].iter().all(|other| other.id != enemy.id));
     }
+    let mut continuation = app.game().clone();
     support::ticks(&mut app, &mut now, 200);
-    assert_eq!(app.game().enemies(), enemies);
-    // Centre-Cell contact ends the run, even though no Bomb was placed.
-    support::travel(&mut app, &mut now, KeyCode::Right, 128);
-    support::travel(&mut app, &mut now, KeyCode::Down, 24);
-    assert_eq!(app.game().outcome(), Some(Outcome::Defeat));
-    assert_eq!(app.game().enemies(), enemies);
+    for _ in 0..200 {
+        continuation.step(&[]).unwrap();
+    }
+    assert_eq!(app.game(), &continuation);
+    assert_ne!(app.game().enemies(), enemies);
+    app.handle_key(press(KeyCode::Char('h')), now);
+    let paused = app.game().clone();
+    support::ticks(&mut app, &mut now, 100);
+    assert_eq!(app.game(), &paused);
+    app.handle_key(press(KeyCode::Char('h')), now);
     app.handle_key(press(KeyCode::Char('r')), now);
     assert_eq!(app.game(), App::new(now, 19, 17).game());
 }
@@ -84,14 +89,17 @@ fn a_revealed_locked_exit_is_traversable_and_clearing_enemies_away_from_it_does_
     assert_eq!(app.game().character().position, point(1152, 640));
     assert!(!app.game().exit_ready());
     assert_eq!(app.game().outcome(), None);
-    support::travel(&mut app, &mut now, KeyCode::Up, 32);
-    support::travel(&mut app, &mut now, KeyCode::Right, 16);
-    support::defeat_enemies(&mut app, &mut now);
+    // Exercise the cleared objective independently with faster valid player/Bomb tuning.
+    let mut app = App::new_with_rules(now, 19, 17, support::objective_rules(true));
+    support::prepare_ready_exit(&mut app, &mut now);
     assert!(app.game().exit_ready());
     assert_eq!(app.game().outcome(), None);
-    assert_eq!(app.game().current_blast_reach(), 1); // No Fire-up required.
+    assert_eq!(app.game().current_blast_reach(), 13); // No Fire-up required.
     app.handle_key(press(KeyCode::Char('r')), now);
-    assert_eq!(app.game(), App::new(now, 19, 17).game());
+    assert_eq!(
+        app.game(),
+        App::new_with_rules(now, 19, 17, support::objective_rules(true)).game()
+    );
     assert_eq!(app.game().enemies().len(), 3);
     assert!(app.game().bomb().is_none());
     assert!(app.game().blasts().is_empty());
@@ -101,11 +109,14 @@ fn a_revealed_locked_exit_is_traversable_and_clearing_enemies_away_from_it_does_
 fn ordinary_input_can_traverse_the_full_perimeter_without_crossing_the_exterior_frame() {
     for (width, height) in [(19, 17), (80, 30)] {
         let mut now = Instant::now();
-        let mut app = App::new(now, width, height);
+        let mut app = App::new_with_rules(now, width, height, support::objective_rules(true));
+        support::prepare_ready_exit(&mut app, &mut now);
+        support::travel(&mut app, &mut now, KeyCode::Up, 1);
+        let initial_tick = app.game().tick();
         // 256 ticks exceeds the full thirteen-Cell extent. A ring of Walls, an
         // eleven-Cell interior, or centre-only bounds would stop at different positions.
         for (direction, expected) in [
-            (KeyCode::Right, point(3232, 128)),
+            (KeyCode::Right, point(3232, 96)),
             (KeyCode::Down, point(3232, 3232)),
             (KeyCode::Left, point(96, 3232)),
             (KeyCode::Up, point(96, 96)),
@@ -114,7 +125,7 @@ fn ordinary_input_can_traverse_the_full_perimeter_without_crossing_the_exterior_
             assert_eq!(app.game().character().position, expected);
             assert_eq!(app.game().outcome(), None);
         }
-        assert_eq!(app.game().tick(), 1024);
+        assert_eq!(app.game().tick(), initial_tick + 1024);
     }
 }
 
@@ -127,7 +138,11 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
         (true, Outcome::Victory),
         (false, Outcome::Victory),
     ] {
-        let rules = GameRules::default().with_turn_assistance(assisted);
+        let rules = if outcome == Outcome::Victory {
+            support::objective_rules(assisted)
+        } else {
+            GameRules::default().with_turn_assistance(assisted)
+        };
         let mut app = App::new_with_rules(start, 19, 17, rules);
         let mut now = start;
         let (direction, terminal_tick) = match outcome {
@@ -137,11 +152,8 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
                 (KeyCode::Right, 121)
             }
             Outcome::Victory => {
-                support::reveal_exit(&mut app, &mut now);
-                support::defeat_enemies(&mut app, &mut now);
-                support::ticks(&mut app, &mut now, 30);
-                support::travel(&mut app, &mut now, KeyCode::Left, 16);
-                support::travel(&mut app, &mut now, KeyCode::Down, 22);
+                support::prepare_ready_exit(&mut app, &mut now);
+                support::travel(&mut app, &mut now, KeyCode::Left, 2);
                 (KeyCode::Down, app.game().tick() + 2)
             }
         };
@@ -225,12 +237,10 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
             // A second successful run after restart, using the identical authored Level.
             let mut now = resumed + TICK_INTERVAL * 2;
             app.handle_key(press(KeyCode::Char('r')), now);
-            support::reveal_exit(&mut app, &mut now);
-            support::defeat_enemies(&mut app, &mut now);
-            support::ticks(&mut app, &mut now, 30);
-            let expected_tick = app.game().tick() + 40;
-            support::travel(&mut app, &mut now, KeyCode::Left, 16);
-            support::travel(&mut app, &mut now, KeyCode::Down, 24);
+            support::prepare_ready_exit(&mut app, &mut now);
+            let expected_tick = app.game().tick() + 4;
+            support::travel(&mut app, &mut now, KeyCode::Left, 2);
+            support::travel(&mut app, &mut now, KeyCode::Down, 2);
             assert_eq!(app.game().outcome(), Some(Outcome::Victory));
             assert_eq!(app.game().tick(), expected_tick);
         }
@@ -307,12 +317,10 @@ fn outcome_quit_commands_act_only_on_press() {
                 support::ticks(&mut app, &mut now, 2);
                 app
             } else {
-                let mut app = App::new(now, 19, 17);
-                support::reveal_exit(&mut app, &mut now);
-                support::defeat_enemies(&mut app, &mut now);
-                support::ticks(&mut app, &mut now, 30);
-                support::travel(&mut app, &mut now, KeyCode::Left, 16);
-                support::travel(&mut app, &mut now, KeyCode::Down, 24);
+                let mut app = App::new_with_rules(now, 19, 17, support::objective_rules(true));
+                support::prepare_ready_exit(&mut app, &mut now);
+                support::travel(&mut app, &mut now, KeyCode::Left, 2);
+                support::travel(&mut app, &mut now, KeyCode::Down, 2);
                 app
             };
             assert_eq!(app.game().outcome(), Some(outcome));

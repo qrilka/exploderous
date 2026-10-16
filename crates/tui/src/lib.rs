@@ -29,7 +29,7 @@ While overlapping a new Bomb, you can move toward or across it
 Once your whole Footprint clears the Bomb Cell, re-entry is blocked
 Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over
 Bombs reveal an Exit hidden beneath a Block; defeat all three Buroru, then reach it alive
-Buroru are stationary in this intermediate level; one Blast hit kills each
+Buroru wander at half player speed; one Blast hit kills each
 Sharing a centre Cell with a Buroru is lethal; overlapping bodies in adjacent Cells are safe
 Reveal Fire-up beneath another Block; let the Blast expire before collecting it
 Collect Fire-up with your centre to add one Cell of reach to later Bombs
@@ -47,7 +47,7 @@ Live map: 13×13 playable Cells, plus a separate exterior frame
 █ Wall pillar
 ▒ Block
 @ Player
-e Buroru (stationary enemy)
+e Buroru (wandering enemy)
 ● Bomb
 ┼ Blast centre
 │ Blast north/south arms
