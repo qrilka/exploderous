@@ -151,7 +151,7 @@ struct BombEscapePermission {
 }
 ```
 
-The records above illustrate the fuller identity-based model. The generated Normal level still has only one bomb-placing Character and capacity one: multiple NPCs do not require multiple live Bombs or a generic identity allocator for Bombs. One optional Bomb may retain the identities of Characters with escape permission. Removing it removes every associated permission; permissions must not transfer to a later Bomb. The delivered single-character implementation's one escape flag must expand to represent these per-Character permissions.
+The records above illustrate the fuller identity-based model. The generated Normal level still has only one bomb-placing Character and capacity one: multiple NPCs do not require multiple live Bombs or a generic identity allocator for Bombs. One optional Bomb retains the identities of Characters with escape permission. Removing it removes every associated permission; permissions must not transfer to a later Bomb.
 
 Bombs are cell-anchored. Placement selects the cell containing the character's centre and does not move or snap the character. A live bomb occupies its cell for Footprint-based movement collision. Ownership lets capacity be enforced per character; capacity counts undetonated bombs, not lingering blasts. A Bomb snapshots the placing Character's blast reach; collecting Fire-up afterward cannot alter it.
 

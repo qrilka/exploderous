@@ -138,9 +138,24 @@ impl CellCoord {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CharacterKind {
+    Bomber,
+    Buroru,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlSource {
+    Human,
+    Npc,
+}
+
+/// Authored Character data; Scenario validates kind/control and placement together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Character {
     pub id: CharacterId,
     pub position: Position,
+    pub kind: CharacterKind,
+    pub control: ControlSource,
 }
 
 /// Validated starting arena and character placement, bound to its game rules.
@@ -149,6 +164,7 @@ pub struct Character {
 pub struct Scenario {
     arena: Arena,
     character: Character,
+    enemies: Vec<Character>,
     rules: GameRules,
     exit: Option<CellCoord>,
     fire_up: Option<CellCoord>,
@@ -165,22 +181,35 @@ impl Scenario {
         rules: GameRules,
     ) -> Result<Self, ConstructionError> {
         let arena = Arena::new(width, height, terrain)?;
-        let footprint = Rect::footprint(character.position, rules);
-        if footprint.left < 0
-            || footprint.top < 0
-            || footprint.right > i64::from(arena.width) * i64::from(WORLD_UNITS_PER_CELL)
-            || footprint.bottom > i64::from(arena.height) * i64::from(WORLD_UNITS_PER_CELL)
-            || arena.obstructions(footprint).next().is_some()
-        {
-            return Err(ConstructionError::InvalidStartingPosition);
+        arena.validate_start(character.position, rules)?;
+        if character.kind != CharacterKind::Bomber || character.control != ControlSource::Human {
+            return Err(ConstructionError::InvalidCharacterControl);
         }
         Ok(Self {
             arena,
             character,
+            enemies: Vec::new(),
             rules,
             exit: None,
             fire_up: None,
         })
+    }
+
+    /// Author stationary Buroru. Identities are unique, but overlapping Characters are legal.
+    pub fn with_enemies(mut self, enemies: Vec<Character>) -> Result<Self, ConstructionError> {
+        let mut identities = BTreeSet::from([self.character.id]);
+        for enemy in &enemies {
+            if !identities.insert(enemy.id) {
+                return Err(ConstructionError::DuplicateCharacterId);
+            }
+            if enemy.kind != CharacterKind::Buroru || enemy.control != ControlSource::Npc {
+                return Err(ConstructionError::InvalidCharacterControl);
+            }
+            self.arena
+                .validate_start(enemy.position, GameRules::default())?;
+        }
+        self.enemies = enemies;
+        Ok(self)
     }
 
     /// Author the single Fire-up separately from terrain, on Floor or beneath a Block.
@@ -315,6 +344,8 @@ pub enum ConstructionError {
     InvalidBlastLifetime,
     InvalidExitLocation,
     InvalidFireUpLocation,
+    DuplicateCharacterId,
+    InvalidCharacterControl,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -334,15 +365,19 @@ pub struct CharacterCommand {
 }
 
 /// The single live Bomb; its permission belongs to this Bomb, not a later one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bomb {
     cell: CellCoord,
     detonate_at: u64,
     blast_reach: u64,
-    escape_allowed: bool,
+    escape_allowed: Vec<CharacterId>,
 }
 
 impl Bomb {
+    pub fn escape_allowed_for(&self, character: CharacterId) -> bool {
+        self.escape_allowed.contains(&character)
+    }
+
     pub fn cell(&self) -> CellCoord {
         self.cell
     }
@@ -381,6 +416,7 @@ impl Blast {
 pub enum StepError {
     DuplicateCommand,
     UnknownCharacter,
+    NpcCommand,
     TickExhausted,
 }
 
@@ -409,6 +445,23 @@ impl Arena {
             height,
             terrain,
         })
+    }
+
+    fn validate_start(
+        &self,
+        position: Position,
+        rules: GameRules,
+    ) -> Result<(), ConstructionError> {
+        let footprint = Rect::footprint(position, rules);
+        if footprint.left < 0
+            || footprint.top < 0
+            || footprint.right > i64::from(self.width) * i64::from(WORLD_UNITS_PER_CELL)
+            || footprint.bottom > i64::from(self.height) * i64::from(WORLD_UNITS_PER_CELL)
+            || self.obstructions(footprint).next().is_some()
+        {
+            return Err(ConstructionError::InvalidStartingPosition);
+        }
+        Ok(())
     }
 
     pub fn width(&self) -> u32 {
@@ -583,6 +636,7 @@ pub enum Outcome {
 pub struct Game {
     arena: Arena,
     character: Character,
+    enemies: Vec<Character>,
     tick: u64,
     rules: GameRules,
     bomb: Option<Bomb>,
@@ -601,6 +655,7 @@ impl Game {
         Self {
             arena: scenario.arena,
             character: scenario.character,
+            enemies: scenario.enemies,
             tick: initial_tick,
             rules: scenario.rules,
             bomb: None,
@@ -613,7 +668,7 @@ impl Game {
     }
 
     /// Advance one active tick; terminal runs remain frozen. No clock or held input.
-    /// Errors preserve complete state, with priority duplicate, unknown, exhausted.
+    /// Errors preserve complete state, with priority duplicate, unknown, NPC, exhausted.
     pub fn step(&mut self, frame: &[CharacterCommand]) -> Result<(), StepError> {
         let mut identities = BTreeSet::new();
         for command in frame {
@@ -621,11 +676,20 @@ impl Game {
                 return Err(StepError::DuplicateCommand);
             }
         }
+        if frame.iter().any(|command| {
+            command.character != self.character.id
+                && !self
+                    .enemies
+                    .iter()
+                    .any(|enemy| enemy.id == command.character)
+        }) {
+            return Err(StepError::UnknownCharacter);
+        }
         if frame
             .iter()
             .any(|command| command.character != self.character.id)
         {
-            return Err(StepError::UnknownCharacter);
+            return Err(StepError::NpcCommand);
         }
         if self.outcome.is_some() {
             return Ok(());
@@ -636,13 +700,19 @@ impl Game {
             .first()
             .and_then(|command| command.movement)
             .map_or([start; 2], |direction| self.movement_path(direction));
+        let path_touches = |cell| {
+            let danger = self.arena.cell_bounds(cell);
+            danger.intersects_centre_segment(start, bend)
+                || danger.intersects_centre_segment(bend, position)
+        };
         let path_harmed = self.blasts.iter().any(|blast| {
-            blast.expires_at > next_tick
-                && blast.cells.iter().any(|&cell| {
-                    let danger = self.arena.cell_bounds(cell);
-                    danger.intersects_centre_segment(start, bend)
-                        || danger.intersects_centre_segment(bend, position)
-                })
+            blast.expires_at > next_tick && blast.cells.iter().copied().any(path_touches)
+        }) || self.enemies.iter().any(|enemy| {
+            path_touches(
+                self.arena
+                    .cell_containing(enemy.position)
+                    .expect("enemy stays in Arena"),
+            )
         });
         let final_cell = self
             .arena
@@ -652,7 +722,7 @@ impl Game {
         let collects_fire_up = self.fire_up == Some(final_cell)
             && self.arena.terrain_at(final_cell) == Some(Terrain::Floor);
         let current_blast_reach = self.current_blast_reach + u64::from(collects_fire_up);
-        let mut bomb = self.bomb;
+        let mut bomb = self.bomb.clone();
         if frame.first().is_some_and(|command| command.place_bomb) && bomb.is_none() {
             bomb = Some(Bomb {
                 cell: self
@@ -663,15 +733,30 @@ impl Game {
                     .checked_add(self.rules.bomb_fuse_ticks)
                     .ok_or(StepError::TickExhausted)?,
                 blast_reach: current_blast_reach,
-                escape_allowed: true,
+                escape_allowed: std::iter::once(Character {
+                    position,
+                    ..self.character
+                })
+                .chain(self.enemies.iter().copied())
+                .filter(|character| {
+                    let rules = if character.kind == CharacterKind::Buroru {
+                        GameRules::default()
+                    } else {
+                        self.rules
+                    };
+                    Rect::footprint(character.position, rules)
+                        .overlaps(self.arena.cell_bounds(final_cell))
+                })
+                .map(|character| character.id)
+                .collect(),
             });
         }
         if let Some(bomb) = &mut bomb
             && !Rect::footprint(position, self.rules).overlaps(self.arena.cell_bounds(bomb.cell))
         {
-            bomb.escape_allowed = false;
+            bomb.escape_allowed.retain(|&id| id != self.character.id);
         }
-        let blast = if let Some(bomb) = bomb.filter(|bomb| {
+        let blast = if let Some(bomb) = bomb.as_ref().filter(|bomb| {
             bomb.detonate_at <= next_tick
                 || self
                     .blasts
@@ -712,6 +797,13 @@ impl Game {
             }
             self.blasts.push(blast);
         }
+        self.enemies.retain(|enemy| {
+            let cell = self
+                .arena
+                .cell_containing(enemy.position)
+                .expect("enemy stays in Arena");
+            !self.blasts.iter().any(|blast| blast.cells.contains(&cell))
+        });
         if path_harmed
             || self
                 .blasts
@@ -719,9 +811,7 @@ impl Game {
                 .any(|blast| blast.cells.contains(&final_cell))
         {
             self.outcome = Some(Outcome::Defeat);
-        } else if self.exit == Some(final_cell)
-            && self.arena.terrain_at(final_cell) == Some(Terrain::Floor)
-        {
+        } else if self.exit == Some(final_cell) && self.exit_ready() {
             self.outcome = Some(Outcome::Victory);
         }
         self.tick = next_tick;
@@ -801,8 +891,8 @@ impl Game {
         // Re-evaluate at each segment's start, including speculative assistance.
         // A cardinal segment cannot re-enter after clearing; the next segment
         // treats the Bomb as solid even before the tick commits its permission.
-        let escaping_bomb = self.bomb.filter(|bomb| {
-            bomb.escape_allowed
+        let escaping_bomb = self.bomb.as_ref().filter(|bomb| {
+            bomb.escape_allowed_for(self.character.id)
                 && Rect::footprint(start, self.rules).overlaps(self.arena.cell_bounds(bomb.cell))
         });
         let half = i64::from(self.rules.footprint_side / 2);
@@ -869,6 +959,18 @@ impl Game {
         self.current_blast_reach
     }
 
+    /// Derived objective eligibility, never a separately mutable unlock flag.
+    pub fn exit_ready(&self) -> bool {
+        self.enemies.is_empty()
+            && self
+                .exit
+                .is_some_and(|cell| self.arena.terrain_at(cell) == Some(Terrain::Floor))
+    }
+
+    pub fn enemies(&self) -> &[Character] {
+        &self.enemies
+    }
+
     pub fn exit(&self) -> Option<CellCoord> {
         self.exit
     }
@@ -905,8 +1007,9 @@ impl Game {
 #[cfg(test)]
 mod tests {
     use super::{
-        Arena, CellCoord, Character, CharacterCommand, CharacterId, Column, ConstructionError,
-        Direction, Game, GameRules, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
+        Arena, CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column,
+        ConstructionError, ControlSource, Direction, Game, GameRules, Position, Row, Scenario,
+        StepError, Terrain, WorldX, WorldY,
     };
 
     const ID: CharacterId = CharacterId::new(42);
@@ -984,6 +1087,8 @@ mod tests {
             character: Character {
                 id: ID,
                 position: point(x, y),
+                kind: CharacterKind::Bomber,
+                control: ControlSource::Human,
             },
         }
     }
@@ -1052,6 +1157,8 @@ mod tests {
         let character = Character {
             id: ID,
             position: point(64, 128),
+            kind: CharacterKind::Bomber,
+            control: ControlSource::Human,
         };
         assert_eq!(
             Scenario::new(

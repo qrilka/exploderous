@@ -2,8 +2,9 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, Column, Direction, Game, GameRules,
-    Outcome, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
+    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ControlSource,
+    Direction, Game, GameRules, Outcome, Position, Row, Scenario, StepError, Terrain,
+    WORLD_UNITS_PER_CELL, WorldX, WorldY,
 };
 use ratatui::{
     Frame,
@@ -27,7 +28,9 @@ Space: place one Bomb; place another after it detonates
 While overlapping a new Bomb, you can move toward or across it
 Once your whole Footprint clears the Bomb Cell, re-entry is blocked
 Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over
-Bombs reveal an Exit hidden beneath a Block; reach its Cell alive to win
+Bombs reveal an Exit hidden beneath a Block; defeat all three Buroru, then reach it alive
+Buroru are stationary in this intermediate level; one Blast hit kills each
+Sharing a centre Cell with a Buroru is lethal; overlapping bodies in adjacent Cells are safe
 Reveal Fire-up beneath another Block; let the Blast expire before collecting it
 Collect Fire-up with your centre to add one Cell of reach to later Bombs
 Blast reach shows your current ability; ticking Bombs keep their old reach
@@ -44,16 +47,17 @@ Live map: 13×13 playable Cells, plus a separate exterior frame
 █ Wall pillar
 ▒ Block
 @ Player
+e Buroru (stationary enemy)
 ● Bomb
 ┼ Blast centre
 │ Blast north/south arms
 ─ Blast east/west arms
-⬚ Exit
+▧ Exit locked (enemies survive)
+⬚ Exit ready
 ◈ Fire-up
 
 Reserved glyphs
 a AI-controlled non-Enemy Character
-e Enemy Character (takes precedence over AI)
 ▣ Bomb-capacity Item"#;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -349,10 +353,28 @@ fn new_game(rules: GameRules) -> Game {
         Character {
             id: CharacterId::new(0),
             position: Position::new(WorldX::new(128), WorldY::new(128)),
+            kind: CharacterKind::Bomber,
+            control: ControlSource::Human,
         },
         rules,
     )
     .expect("the fixed Level arena is valid")
+    .with_enemies(
+        [2, 4, 6]
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| Character {
+                id: CharacterId::new(index as u32 + 1),
+                position: Position::new(
+                    WorldX::new(8 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2),
+                    WorldY::new(row * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2),
+                ),
+                kind: CharacterKind::Buroru,
+                control: ControlSource::Npc,
+            })
+            .collect(),
+    )
+    .expect("three distinctly identified Buroru start on Floor")
     .with_exit(CellCoord::new(Column::new(4), Row::new(2)))
     .expect("the Exit is beneath its authored Block")
     .with_fire_up(CellCoord::new(Column::new(2), Row::new(2)))
@@ -417,6 +439,13 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
     for (cell, terrain) in arena.cells() {
         map.push(if cell == character_cell {
             '@'
+        } else if app
+            .game
+            .enemies()
+            .iter()
+            .any(|enemy| arena.cell_containing(enemy.position) == Some(cell))
+        {
+            'e'
         } else {
             match terrain {
                 Terrain::Floor => {
@@ -439,7 +468,7 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
                     } else if app.game.fire_up() == Some(cell) {
                         '◈'
                     } else if app.game.exit() == Some(cell) {
-                        '⬚'
+                        if app.game.exit_ready() { '⬚' } else { '▧' }
                     } else {
                         ' '
                     }
