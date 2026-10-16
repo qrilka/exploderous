@@ -151,6 +151,7 @@ pub struct Scenario {
     character: Character,
     rules: GameRules,
     exit: Option<CellCoord>,
+    fire_up: Option<CellCoord>,
 }
 
 impl Scenario {
@@ -178,7 +179,20 @@ impl Scenario {
             character,
             rules,
             exit: None,
+            fire_up: None,
         })
+    }
+
+    /// Author the single Fire-up separately from terrain, on Floor or beneath a Block.
+    pub fn with_fire_up(mut self, cell: CellCoord) -> Result<Self, ConstructionError> {
+        if !matches!(
+            self.arena.terrain_at(cell),
+            Some(Terrain::Floor | Terrain::Block)
+        ) {
+            return Err(ConstructionError::InvalidFireUpLocation);
+        }
+        self.fire_up = Some(cell);
+        Ok(self)
     }
 
     /// Author one Exit on Floor or beneath a Block, never outside the Arena or in a Wall.
@@ -300,6 +314,7 @@ pub enum ConstructionError {
     InvalidBlastReach,
     InvalidBlastLifetime,
     InvalidExitLocation,
+    InvalidFireUpLocation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -323,6 +338,7 @@ pub struct CharacterCommand {
 pub struct Bomb {
     cell: CellCoord,
     detonate_at: u64,
+    blast_reach: u64,
     escape_allowed: bool,
 }
 
@@ -333,6 +349,10 @@ impl Bomb {
 
     pub fn detonate_at(&self) -> u64 {
         self.detonate_at
+    }
+
+    pub fn blast_reach(&self) -> u64 {
+        self.blast_reach
     }
 }
 
@@ -568,6 +588,9 @@ pub struct Game {
     bomb: Option<Bomb>,
     blasts: Vec<Blast>,
     exit: Option<CellCoord>,
+    fire_up: Option<CellCoord>,
+    // u32 base reach plus the one available upgrade always fits u64.
+    current_blast_reach: u64,
     outcome: Option<Outcome>,
 }
 
@@ -583,6 +606,8 @@ impl Game {
             bomb: None,
             blasts: Vec::new(),
             exit: scenario.exit,
+            fire_up: scenario.fire_up,
+            current_blast_reach: u64::from(scenario.rules.blast_reach),
             outcome: None,
         }
     }
@@ -619,6 +644,14 @@ impl Game {
                         || danger.intersects_centre_segment(bend, position)
                 })
         });
+        let final_cell = self
+            .arena
+            .cell_containing(position)
+            .expect("Character stays in Arena");
+        // Only the single eligible bomber collects; NPC movement must not use this phase.
+        let collects_fire_up = self.fire_up == Some(final_cell)
+            && self.arena.terrain_at(final_cell) == Some(Terrain::Floor);
+        let current_blast_reach = self.current_blast_reach + u64::from(collects_fire_up);
         let mut bomb = self.bomb;
         if frame.first().is_some_and(|command| command.place_bomb) && bomb.is_none() {
             bomb = Some(Bomb {
@@ -629,6 +662,7 @@ impl Game {
                 detonate_at: next_tick
                     .checked_add(self.rules.bomb_fuse_ticks)
                     .ok_or(StepError::TickExhausted)?,
+                blast_reach: current_blast_reach,
                 escape_allowed: true,
             });
         }
@@ -645,7 +679,7 @@ impl Game {
                     .any(|blast| blast.expires_at > next_tick && blast.cells.contains(&bomb.cell))
         }) {
             Some(Blast {
-                cells: self.blast_coverage(bomb.cell),
+                cells: self.blast_coverage(bomb.cell, bomb.blast_reach),
                 expires_at: next_tick
                     .checked_add(self.rules.blast_lifetime_ticks)
                     .ok_or(StepError::TickExhausted)?,
@@ -656,9 +690,21 @@ impl Game {
         // Everything fallible is checked before committing any live-state changes.
         self.blasts.retain(|blast| blast.expires_at > next_tick);
         self.character.position = position;
+        if collects_fire_up {
+            self.fire_up = None;
+        }
+        self.current_blast_reach = current_blast_reach;
         self.bomb = bomb;
         if let Some(blast) = blast {
             self.bomb = None;
+            // Resolve Item hits once per new effect, before destroying its covering Block.
+            // Fixed lingering coverage cannot newly expose an Item: never reapply its hit.
+            // Thus the revealing effect preserves it, but any distinct later effect can hit it.
+            if self.fire_up.is_some_and(|cell| {
+                self.arena.terrain_at(cell) == Some(Terrain::Floor) && blast.cells.contains(&cell)
+            }) {
+                self.fire_up = None;
+            }
             for &cell in &blast.cells {
                 if self.arena.terrain_at(cell) == Some(Terrain::Block) {
                     self.arena.set_terrain(cell, Terrain::Floor);
@@ -666,10 +712,6 @@ impl Game {
             }
             self.blasts.push(blast);
         }
-        let final_cell = self
-            .arena
-            .cell_containing(position)
-            .expect("Character stays in Arena");
         if path_harmed
             || self
                 .blasts
@@ -686,7 +728,7 @@ impl Game {
         Ok(())
     }
 
-    fn blast_coverage(&self, origin: CellCoord) -> Vec<CellCoord> {
+    fn blast_coverage(&self, origin: CellCoord, reach: u64) -> Vec<CellCoord> {
         let mut cells = vec![origin];
         for direction in [
             Direction::Up,
@@ -695,7 +737,7 @@ impl Game {
             Direction::Left,
         ] {
             let mut cell = origin;
-            for _ in 0..self.rules.blast_reach {
+            for _ in 0..reach {
                 let Some(next) = self.arena.neighbor(cell, direction) else {
                     break;
                 };
@@ -832,6 +874,16 @@ impl Game {
             WorldX::new(i32::try_from(x).expect("movement stays within validated arena extents")),
             WorldY::new(i32::try_from(y).expect("movement stays within validated arena extents")),
         )
+    }
+
+    /// Item location, including while covered; terrain determines its visibility.
+    pub fn fire_up(&self) -> Option<CellCoord> {
+        self.fire_up
+    }
+
+    /// The eligible bomber's current ability, separate from immutable base rules.
+    pub fn current_blast_reach(&self) -> u64 {
+        self.current_blast_reach
     }
 
     pub fn exit(&self) -> Option<CellCoord> {
