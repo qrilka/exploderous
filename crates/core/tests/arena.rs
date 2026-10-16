@@ -115,7 +115,11 @@ fn a_thirteen_cell_interior_keeps_complete_footprints_and_blasts_inside_every_co
             assert_eq!(game.arena().cell_containing(point(-1, 128)), None);
             assert_eq!(game.arena().cell_containing(point(128, 3328)), None);
 
+            // Place from the Cell centre: an inward move from exterior edge
+            // contact would approach the Bomb centre, which escape forbids.
+            let mut game = classic_arena(start, rules);
             step(&mut game, None, true);
+            assert_eq!(game.character().position, start);
             assert_eq!(game.bomb().unwrap().cell(), origin);
             // Escape two Cells along the edge, then two Cells inward. Pillars must
             // leave the even-coordinate corridors navigable; neither Blast arm hits us.

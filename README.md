@@ -17,7 +17,7 @@ The root is a virtual workspace. The playable Normal level is `crates/tui` (pack
 
 ## Project status and direction
 
-The headless core and TUI provide a fixed Normal level with a 13×13 playable Arena, interior Wall pillars, and a separately drawn exterior boundary. It includes movement, Bomb placement, lethal Blasts that clear Blocks, a covered Exit, victory/defeat, and restart of the same authored layout. Generation, enemies, and Items are not implemented yet. Further gameplay and verification work is outlined in the [project plan](docs/project-plan.md). Feature scope and acceptance gates are tracked in GitHub issues, while lasting gameplay rules live in the design.
+The headless core and TUI provide a fixed Normal level with a 13×13 playable Arena, interior Wall pillars, and a separately drawn exterior boundary. It includes movement, Bomb placement with [away-only player escape](docs/design/game-state.md#bombs-and-escape-permissions), lethal Blasts that clear Blocks, a covered Exit, victory/defeat, and restart of the same authored layout. Generation, enemies, and Items are not implemented yet. Further gameplay and verification work is outlined in the [project plan](docs/project-plan.md). Feature scope and acceptance gates are tracked in GitHub issues, while lasting gameplay rules live in the design.
 
 - [Project plan](docs/project-plan.md)
 - [Game-state and simulation design](docs/design/game-state.md)
