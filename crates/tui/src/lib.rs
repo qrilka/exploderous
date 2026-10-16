@@ -25,6 +25,8 @@ const HELP: &str = r#"NORMAL LEVEL
 Controls
 Arrow keys: move; latest press wins; release falls back
 Space: place one Bomb; place another after it detonates
+While overlapping a new Bomb, move only away from its centre
+Once your whole Footprint clears the Bomb Cell, re-entry is blocked
 Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over
 Bombs reveal an Exit hidden beneath a Block; reach its Cell alive to win
 Victory or Game Over freezes play; only restart or quit acts

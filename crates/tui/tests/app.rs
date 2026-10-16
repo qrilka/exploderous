@@ -435,6 +435,40 @@ fn space_places_a_bomb_after_movement_on_the_next_tick() {
 }
 
 #[test]
+fn ordinary_input_escapes_away_from_a_bomb_but_cannot_approach_or_reenter_it() {
+    for assisted in [false, true] {
+        let mut now = Instant::now();
+        let mut app = App::new_with_rules(
+            now,
+            19,
+            17,
+            GameRules::default().with_turn_assistance(assisted),
+        );
+        support::travel(&mut app, &mut now, KeyCode::Right, 1);
+        app.handle_key(press(KeyCode::Char(' ')), now);
+        support::ticks(&mut app, &mut now, 1);
+        assert_eq!(app.game().character().position, point(144, 128));
+        assert_eq!(app.game().bomb().unwrap().cell().column().value(), 0);
+        for (direction, count, expected) in [
+            (KeyCode::Left, 1, point(144, 128)), // approach blocked, not a bad command
+            (KeyCode::Down, 1, point(144, 144)), // perpendicular escape is legal
+            (KeyCode::Up, 1, point(144, 144)),   // cannot undo that travel
+            (KeyCode::Right, 12, point(336, 144)), // body still overlaps by 16
+            (KeyCode::Left, 1, point(336, 144)),
+            (KeyCode::Right, 1, point(352, 144)), // exact edge: fully clear
+            (KeyCode::Left, 1, point(352, 144)),  // re-entry blocked
+        ] {
+            let tick = app.game().tick();
+            support::travel(&mut app, &mut now, direction, count);
+            assert_eq!(app.game().tick(), tick + u64::from(count));
+            assert_eq!(app.game().character().position, expected);
+            assert_eq!(app.game().outcome(), None);
+        }
+        assert_eq!(app.game().bomb().unwrap().detonate_at(), 122);
+    }
+}
+
+#[test]
 fn the_most_recent_held_direction_wins_and_release_restores_the_previous_one() {
     let start = Instant::now();
     let mut app = App::new(start, 19, 17);
