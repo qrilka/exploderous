@@ -805,23 +805,6 @@ impl Game {
             bomb.escape_allowed
                 && Rect::footprint(start, self.rules).overlaps(self.arena.cell_bounds(bomb.cell))
         });
-        if let Some(bomb) = escaping_bomb {
-            let centre = self
-                .arena
-                .cell_center(bomb.cell)
-                .expect("Bomb stays in Arena");
-            // Cardinal distance is strictly increasing iff its moving coordinate
-            // starts at the centre or on the side it is moving toward.
-            let approaches = match direction {
-                Direction::Up => start.y.0 > centre.y.0,
-                Direction::Right => start.x.0 < centre.x.0,
-                Direction::Down => start.y.0 < centre.y.0,
-                Direction::Left => start.x.0 > centre.x.0,
-            };
-            if approaches {
-                return start;
-            }
-        }
         let half = i64::from(self.rules.footprint_side / 2);
         let distance = i64::from(distance);
         let cell = i64::from(WORLD_UNITS_PER_CELL);

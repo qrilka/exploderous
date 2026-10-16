@@ -298,7 +298,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
     for entry in [
         "Arrow keys: move",
         "Space: place one Bomb; place another after it detonates",
-        "While overlapping a new Bomb, move only away from its centre",
+        "While overlapping a new Bomb, you can move toward or across it",
         "Once your whole Footprint clears the Bomb Cell, re-entry is blocked",
         "Blasts clear Blocks; entering a Blast Cell with your centre is lethal: Game Over",
         "Bombs reveal an Exit hidden beneath a Block; reach its Cell alive to win",
