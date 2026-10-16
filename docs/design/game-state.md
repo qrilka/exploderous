@@ -1,6 +1,6 @@
 # Game state and simulation design
 
-Agreed representation and behavioral contract for the headless core. See the [project plan](../project-plan.md), [glossary](../../GLOSSARY.md), and [representation ADR](../adr/0002-grid-terrain-and-positioned-objects.md).
+Agreed representation and behavioral contract for the headless core. This includes the approved generated Normal level with Buroru and Fire-up; approval does not imply those capabilities are already implemented. The [README](../../README.md) describes delivered capabilities. See the [project plan](../project-plan.md), [glossary](../../GLOSSARY.md), and [representation ADR](../adr/0002-grid-terrain-and-positioned-objects.md).
 
 Characters use integer sub-cell positions and movement. Rust sketches below explain data relationships rather than complete declarations. Names such as `Cell`, `Tick`, and identity types denote distinct concepts. The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) defines the movement scale, defaults, limits, and validation/error contract. [Turn assistance](https://github.com/qrilka/exploderous/issues/5) deliberately revises its initial no-alignment rule and Cartesian verification matrix as specified below; remaining choices are listed under [Open design decisions](#open-design-decisions).
 
@@ -35,21 +35,33 @@ The outside of the arena is solid. A surrounding ring of wall cells is not requi
 
 ### Classic arena layout
 
-Classic arenas use an odd-sized playable interior surrounded by a one-cell ring of walls. Wall pillars occur at every other interior row and column: with zero-based interior coordinates, both coordinates are odd. With the outer ring included, both pillar coordinates are even. The other interior cells form corridors and may contain floor or authored blocks. This is not a checkerboard of isolated floor cells.
+Classic arenas use an odd-sized playable interior with wall pillars at every other row and column: with zero-based interior coordinates, both coordinates are odd. The other interior cells form corridors and may contain floor or blocks. This is not a checkerboard of isolated floor cells.
 
-For example, `#` denotes a wall and `.` denotes floor:
+For example, `#` denotes a wall pillar and `.` denotes floor; the exterior boundary is not stored in this grid:
 
 ```text
-#######
-#.....#
-#.#.#.#
-#.....#
-#.#.#.#
-#.....#
-#######
+.....
+.#.#.
+.....
+.#.#.
+.....
 ```
 
-Odd interior dimensions let the alternating pattern begin and end with corridors; adding two border cells preserves odd total dimensions. This is a classic layout rule, not a universal terrain-storage invariant. General scenario construction also accepts valid even-sized rectangles and layouts without a wall ring. Concrete level layouts choose their playable size.
+Odd interior dimensions let the alternating pattern begin and end with corridors. This is a classic layout rule, not a universal terrain-storage invariant. General scenario construction also accepts valid even-sized rectangles and explicit wall rings. A frontend may draw a separate exterior boundary without adding terrain cells or shifting gameplay coordinates.
+
+### Generated Normal level
+
+The first fuller Normal level stores a **13×13 playable Arena**, coordinates 0 through 12, with no outer wall-cell ring. The outside remains solid. The TUI draws its exterior boundary separately and distinguishes it visually from interior wall pillars.
+
+Generation produces a validated Scenario with:
+
+- Fixed classic pillars and a target Block density of about 40% among eligible non-pillar Cells, excluding reserved starting spaces. Density is a tuning value, not an exact count invariant.
+- One human-controlled bomber at the centre of `(0, 0)`. Cells `(0, 0)`, `(1, 0)`, `(2, 0)`, `(0, 1)`, and `(0, 2)` are reserved Floor, providing escape room for the first Bomb.
+- Exactly three Buroru on distinct Floor Cells. Each starts at least six corridor steps from the player, measured along cardinal routes treating Walls as impassable and ignoring Blocks. Each has at least one adjacent Floor Cell.
+- Enemy pockets separated by Blocks are permitted. All non-Wall areas connect after removing Blocks; pockets do not imply an initially open route to the player.
+- One Fire-up and one Exit under two different Blocks.
+
+Generation belongs to headless gameplay rather than the renderer. Given the same generation parameters and random state, it produces the same Scenario. Starting the application or restarting requests fresh generation; restart does not restore the previous generated Scenario. Fresh generation advances generation random state rather than reseeding every restart with the same value. Random generation may coincidentally repeat a layout; freshness means a new generation, not a promise of global uniqueness. Invalid or impossible generation parameters must fail explicitly rather than loop indefinitely.
 
 ## Characters and precise positions
 
@@ -89,7 +101,7 @@ Movement:
 
 ### Turn assistance
 
-`GameRules` holds movement and bomb parameters together, selects assisted or strict movement before Scenario construction, and remains fixed for the Game's lifetime. Assistance is enabled by default; strict mode uses only ordinary cardinal movement. The canonical Footprint remains 192 world units and movement distance remains 16. At the 256-unit Cell scale, that Footprint allows centre offsets of ±32 in a one-Cell corridor.
+`GameRules` holds movement and bomb parameters together, selects assisted or strict movement before Scenario construction, and remains fixed for the Game's lifetime. Assistance is enabled by default; strict mode uses only ordinary cardinal movement. The canonical bomber Footprint remains 192 world units and its movement distance remains 16. At the 256-unit Cell scale, that Footprint allows centre offsets of ±32 in a one-Cell corridor.
 
 For each commanded tick:
 
@@ -110,6 +122,18 @@ Character identities remain stable through removal/reordering of other records, 
 
 Kinds are explicit compiled-in variants with kind-specific state, not arbitrary property bags, a plugin system, or a trait hierarchy. Control source is separate from kind: a bomber can be human-controlled or AI-controlled, while Normal can also have distinct enemy kinds. Overlap legality is decided by rules, not a universal one-character-per-cell storage invariant.
 
+### Buroru movement and Character contact
+
+Buroru are NPC enemies, not competing bombers. They do not place Bombs or collect Items. Their initial Footprint uses the canonical 192-unit side; initial movement is 8 world units per tick, half the player's 16. Speed remains a distinct tuning value.
+
+Their policy is persistent, timer-driven cardinal wandering, without player pursuit, blast prediction, or deliberate hazard avoidance. A run lasts a uniformly selected one through four Cells' travel time; at the initial speed these are 32, 64, 96, or 128 ticks of unobstructed travel. At run expiry, choose uniformly among legal cardinal directions, including continuing forward and reversing. Wall/Block/Bomb obstruction interrupts a run; wait when no direction is legal. Centre-based direction selection and centred routes are distinct from the player's turn assistance: do not snap positions, turn through terrain, or teleport a Character to resolve obstruction. An overlapping Bomb can require reversing along the current route under the escape rule below.
+
+This policy is informed by original NES Bomberman movement families, not claimed to reproduce PC Engine Buroru exactly. See the [NPC research and evidence limits](../research/first-level-npcs.md).
+
+Buroru do not block or harm one another. Player–enemy contact instead causes Defeat when both centres occupy the same Cell, including contact during actual movement. Footprint overlap into a neighboring Cell alone is harmless. Compare centre occupancy at the same point in tick movement; visiting a Cell at different times is not simultaneous contact. The shared half-open Cell boundaries apply. Each Buroru dies from one Blast hit, using the same centre-containing Cell and actual-path hazard rules as the player.
+
+NPC decisions use explicit policy/random state and deterministic processing order, independent of external command enumeration or incidental storage order. Complete cloning captures headings, run timing, random state, and living enemies; a removed enemy's identity is not reused.
+
 ## Bombs and escape permissions
 
 ```rust
@@ -118,6 +142,7 @@ struct Bomb {
     cell: Cell,
     owner: CharacterId,
     detonate_at: Tick,
+    blast_reach: u32, // Snapshot of the owner's reach at placement.
 }
 
 struct BombEscapePermission {
@@ -126,11 +151,13 @@ struct BombEscapePermission {
 }
 ```
 
-The records above illustrate the fuller identity-based model. For the current single-character, capacity-one implementation, the Game instead stores one optional Bomb with its escape-permission flag attached. Removing the Bomb removes its permission; no separate Bomb identity allocator or permission collection is needed. Revisit this representation when multiple live Bombs or characters are introduced.
+The records above illustrate the fuller identity-based model. The generated Normal level still has only one bomb-placing Character and capacity one: multiple NPCs do not require multiple live Bombs or a generic identity allocator for Bombs. One optional Bomb may retain the identities of Characters with escape permission. Removing it removes every associated permission; permissions must not transfer to a later Bomb. The delivered single-character implementation's one escape flag must expand to represent these per-Character permissions.
 
-Bombs are cell-anchored. Placement selects the cell containing the character's centre and does not move or snap the character. A live bomb occupies its cell for movement collision. Ownership lets capacity be enforced per character; capacity counts undetonated bombs, not lingering blasts.
+Bombs are cell-anchored. Placement selects the cell containing the character's centre and does not move or snap the character. A live bomb occupies its cell for Footprint-based movement collision. Ownership lets capacity be enforced per character; capacity counts undetonated bombs, not lingering blasts. A Bomb snapshots the placing Character's blast reach; collecting Fire-up afterward cannot alter it.
 
-The placing character receives passage permission for that specific bomb. Permission ends once the whole footprint clears the bomb cell, or the bomb ceases to exist. Other bombs still block movement. Permission is authoritative gameplay state included in cloning/replay, not inferred solely from the character's current centre.
+Every Character whose Footprint overlaps the Bomb Cell at placement receives escape permission for that Bomb. This includes the placing player and any overlapping enemy whose centre may still be in a neighboring Cell. Permission permits only movement that increases centre-to-centre distance from the Bomb, never movement toward it. Apply this to each actually traveled segment, including player turn assistance. From the exact Bomb centre, any initial direction is valid; from directly beside it, perpendicular travel is allowed when it increases distance. No floating-point square root is required to compare distances.
+
+Permission ends once the whole Footprint clears the Bomb Cell, or the Bomb ceases to exist. Clearing it during movement ends permission for the remaining path, not just the next tick. Other Bombs still block movement. Permission is authoritative gameplay state included in cloning/replay, not inferred solely from the Character's current centre. This intentionally tightens the delivered player's former unrestricted passage while escaping.
 
 A newly placed bomb receives its full fuse; a live blast can trigger it immediately. Store absolute simulation-tick deadlines, never wall-clock deadlines or decrementing countdowns. A bomb placed during tick P with positive fuse F detonates during tick P + F unless triggered earlier. Placement selects the centre-containing cell after that tick's movement.
 
@@ -155,7 +182,7 @@ A blast can trigger another bomb in the same tick. All propagation in that explo
 
 ### Tick phases and deadline boundaries
 
-The tick label T denotes the resulting tick of a step advancing from T - 1. During active play, expire blasts whose deadline is T before movement, then resolve movement, placement, explosions, harm, and victory in that order. Preserve path-contact evidence for harm from blasts live during movement; a safe endpoint does not undo crossing a hazard.
+The tick label T denotes the resulting tick of a step advancing from T - 1. During active play, expire blasts whose deadline is T before movement, then resolve movement, exposed Item collection, placement, explosions, harm, and victory in that order. Collection after movement and before placement means entering Fire-up's Cell and placing a Bomb in the same tick uses the upgraded reach. Preserve path-contact evidence for harm from Blasts live during movement and for simultaneous player–enemy centre contact; a safe endpoint does not undo crossing a hazard.
 
 A blast created on tick D with positive lifetime L has an absolute expiry deadline D + L. It is dangerous on creation and through tick D + L - 1, then expires before movement on D + L. For example, a bomb placed on tick 10 with a 120-tick fuse detonates on tick 130; with a 30-tick blast lifetime, its blast is dangerous through tick 159 and gone before movement on tick 160. Initial tuning values are owned by the [first playable level spec](https://github.com/qrilka/exploderous/issues/9).
 
@@ -175,13 +202,17 @@ struct Item {
 // exit: Option<Cell>
 ```
 
-Items are separate cell-anchored records. Their kinds distinguish specified power-up effects, such as increased bomb capacity or blast reach. The exact catalog remains open.
+Items are separate cell-anchored records. The specified first Item kind is Fire-up; further kinds, including capacity upgrades, remain outside this level's contract.
 
-An item under a block is hidden and cannot be collected. Destroying the block reveals the item rather than deleting its record. Collection uses the character's centre entering its cell. Consumption removes the item record and applies its specified effect to the character.
+An Item under a Block is hidden and cannot be collected. Destroying the Block reveals the Item rather than deleting its record. The bomber collects an exposed Item when its centre enters that Cell; consumption removes the record and applies its specified effect. NPCs cannot collect it. Buroru touching or passing through it do not consume it.
 
-Game state stores a single optional exit directly as `exit: Option<Cell>`. Scenarios without an exit have no exit objective; the initial Normal level requires one.
+Fire-up increases the bomber's current blast reach by one Cell beyond the origin in each cardinal direction. The generated level starts with reach one and contains one Fire-up, increasing reach to two. Base GameRules remain immutable; current per-Character abilities are mutable gameplay state, reset for a fresh run. Bombs retain their placement-time reach snapshot.
 
-Exit visibility and eligibility are different. Terrain determines whether it is covered. Objective rules determine whether it can complete the level. Initially, uncover it and reach its cell with the character's centre alive. Later enemy-clear requirements belong to objective rules, not to terrain or a redundant visibility flag. Harm precedes victory.
+The Blast that reveals Fire-up cannot destroy it, including during that same effect's remaining lifetime. A distinct later Blast can destroy the exposed Item, even while the revealing effect still lingers. This protection must distinguish effects, not simply grant immunity whenever any Blast occupies the Cell. A revealed Item is not a safe Cell while the revealing Blast remains live. A covered Exit survives reveal and later Blasts.
+
+Game state stores a single optional Exit directly as `exit: Option<Cell>`. Scenarios without an Exit have no Exit objective; the generated Normal level requires one.
+
+Exit visibility and eligibility are different. Terrain determines whether it is covered. The Normal objective requires the living player's centre on its uncovered Cell and zero surviving enemies. Fire-up collection is not required. A locked Exit remains traversable Floor after reveal; standing there when the last enemy dies can complete the level without re-entry. Harm precedes victory. Eligibility is derived from enemy state, not a redundant mutable unlock flag; the TUI distinguishes visible locked and ready states.
 
 Example coexistence:
 
@@ -194,15 +225,17 @@ Example coexistence:
 | Bomb beneath that character | Separate live bomb and escape permission |
 | Two blasts sharing a floor cell | Separate coverage/lifetime records |
 
-Power-up effects, item destruction by blasts (especially newly revealed items), multiple-item policies, and simultaneous pickup conflicts remain open design decisions. They are not silently chosen by the container layout.
+Additional power-up kinds, multiple-Item sharing policies, and simultaneous collection by multiple eligible bombers remain open. They are not silently chosen by the container layout; the generated level has one eligible collector and one Fire-up.
 
 ## Level outcomes and restart
 
-The initial Normal level has one life per run. Lethal blast contact ends the run in defeat; alive centre entry into the uncovered exit ends it in victory. Harm precedes victory even if both conditions arise during the same tick.
+The Normal level has one life per run. Lethal Blast or player–enemy centre contact ends the run in Defeat. A living player's centre on the uncovered Exit with no surviving enemies ends it in Victory. Harm precedes victory even if both conditions arise during the same tick.
 
 Either outcome freezes the complete simulation, including tick progression, movement, placement, and bomb/blast deadlines. A frontend stops any catch-up batch immediately when the outcome occurs. The TUI displays defeat in a centered modal over the Arena with readable restart/quit instructions. The outcome view accepts only restart or quit, not movement, placement, or active-play help.
 
-Restart creates a fresh run from the original scenario and selected rules: initial terrain, covered exit, character position, initial tick, active lifecycle, and available bomb capacity. It removes bombs, blasts, and escape permissions. Frontends also clear held directions, pending placement, and elapsed-time backlog; no old action or paused time leaks into the new run.
+Restart of the generated Normal level creates a newly generated Scenario under the selected rules, rather than replaying the previous one. The fresh Game begins at tick zero with its new terrain, covered Exit/Fire-up, player/enemy starting state, active lifecycle, initial blast reach, and available Bomb capacity. It removes old Bombs, Blasts, escape permissions, consumed/destroyed Items, and AI state. Frontends clear held directions, pending placement, and elapsed-time backlog; no old action or paused time leaks into the new run.
+
+Constructing a Game twice from one explicit Scenario still reproduces that Scenario. Deterministic scenario replay and the frontend's regenerate-on-restart action have different purposes.
 
 ## Complete authoritative state
 
@@ -215,9 +248,9 @@ The complete simulation state owns:
 - Bombs, live blast effects, items, and the optional exit.
 - Bomb-escape permissions.
 - AI policy state, complete random-generator state, and identity allocation state where applicable.
-- The initial definition/state needed for restart.
+- The Scenario definition needed to reproduce a particular run. A session starting fresh generated runs also retains generation random state, separately from the active Game's AI state.
 
-An immutable restart definition and mutable current terrain have different roles; they are not competing copies of live state. Likewise, an initial random seed alone cannot replace the current generator state after random choices have occurred.
+An immutable Scenario definition and mutable current terrain have different roles; they are not competing copies of live state. Likewise, an initial random seed alone cannot replace the current generator state after random choices have occurred. Cloning an active Game reproduces its future, whereas a Normal restart advances session generation state to request a fresh Scenario.
 
 ## Simulation interface and invariants
 
@@ -272,16 +305,18 @@ Check the complete Footprint along both observed path segments with independent 
 
 ### Other verification scope
 
-Object-interaction properties include release of bomb capacity while a blast persists, expiry of one overlapping blast, hidden item/exit reveal, escaped-bomb re-entry, paths crossing live hazards, and death before victory. Check exact detonation/expiry boundaries, atomic deadline-overflow rejection, frozen outcome state, and complete restart restoration through whole-game stepping and read-only observations.
+Object-interaction properties include release of Bomb capacity while a Blast persists, expiry of one overlapping Blast, Fire-up/Exit reveal, protection from the revealing effect versus destruction by a distinct later effect, collection before placement, placement-time reach snapshots, away-only per-Character Bomb escape and blocked re-entry, centre paths crossing live hazards, simultaneous player–enemy centre contact, and harm before victory. Check exact detonation/expiry boundaries, atomic deadline-overflow rejection including AI/random state, and frozen outcome state through whole-Game stepping and public observation. Observation means concrete terrain, Character positions/kinds, living enemies, Items, Bomb/Blast properties, abilities, tick, and outcome—not a test-only state mutation interface.
+
+Test generated Scenario invariants through the same validated construction boundary, using reproducible random state. Check safe opening, enemy distances/adjacency, distinct covered Fire-up/Exit Cells, bounds/pillars, and connectivity after Block removal; statistical coverage or seed counts alone do not prove these properties. Check centred NPC travel, half-speed progress, legal timer/obstruction decisions, trapped waiting, and complete clone continuation without depending on a particular internal PRNG layout. Through frontend input/time/rendering boundaries, check the separate visual boundary, concealed/revealed objects, locked/ready Exit, and fresh-generation restart with cleared input/timing state. Do not require a randomized restart's terrain to differ by chance; verify that fresh generation is requested rather than restoring the old Game.
 
 [Kani research](../research/kani-representation-constraints.md) supports bounded vectors as well as arrays; it does not establish comparative proof cost. Construct small valid arenas through the production interface, state assumptions/dimensions/action horizons, and retain unwinding checks. Small arenas do not prove larger sizes or unbounded play; arithmetic/limit cases need separately scoped checks. Kani uses its own toolchain, not automatically the repository's Rust pin; compatibility and practical proof cost are not established by this design.
 
 ## Open design decisions
 
 - Additional movement rules for later character kinds or dynamic effects; initial movement parameters and input/errors are defined in the movement slice spec.
-- Bomb/blast resource policies when capacity greater than one or additional action sources are introduced; single-character, capacity-one timing and deadline-overflow rules are settled above.
-- Multi-character interactions: conflicting moves, swaps, and contact rules.
-- AI: decision ordering and random-consumption conventions.
-- Objectives and items: additional completion conditions, power-up catalog/effects, item destruction/reveal behavior, multiple-item policies, and pickup conflicts.
+- Bomb/blast resource policies when capacity greater than one or additional action sources are introduced; single-bomber, capacity-one timing and deadline-overflow rules are settled above.
+- Solid Character conflicts, swaps, and contact rules for modes beyond the specified bomber/Buroru interactions.
+- AI policies beyond timed Buroru wandering, including pursuit, hazard avoidance, and computer-controlled bombers. Implementations must make the specified policy's processing/random-consumption order explicit.
+- Objectives and Items beyond this level's enemy-clear objective and Fire-up rules, including additional kinds, multiple-Item policies, and multiple-collector conflicts.
 
 The representation accommodates these choices without silently defining them. Gameplay dimensions, timing, and body size remain explicit parameters where tuning is needed; terminal display and unchecked integer types are not their source of truth. Delivery scope and verification-tool rollout belong in the relevant [GitHub spec issue or implementation ticket](../agents/issue-tracker.md); the [project plan](../project-plan.md) records broad direction and priorities.

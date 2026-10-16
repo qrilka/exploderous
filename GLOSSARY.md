@@ -21,12 +21,15 @@ _Avoid_: Actor
 **NPC**:
 A computer-controlled character, including both AI-controlled competitors and enemies.
 
+**Buroru**:
+A wandering enemy kind in Normal.
+
 **Arena**:
 The grid-shaped playing area containing terrain, characters, bombs, and other gameplay objects.
 _Avoid_: Map, board
 
 **Scenario**:
-An authored starting arena, its initial objects and positions, and the rules of play. It is a starting definition, not ongoing state or elapsed game time.
+A starting arena, its initial objects and positions, and the rules of play, whether authored or generated. It is a starting definition, not ongoing state or elapsed game time.
 
 **Game**:
 One simulation instance of a scenario, with its own evolving arena, objects, and game time.
@@ -70,6 +73,9 @@ A sequence of detonations in which one bomb's blast triggers another bomb.
 **Item**:
 A collectible object in an arena that grants its specified power-up when consumed. It can be concealed beneath a block.
 _Avoid_: Pickup
+
+**Fire-up**:
+An item that increases a bomber's blast reach.
 
 **Exit**:
 The destination a player must reach to complete a Normal level once its completion conditions are satisfied.
