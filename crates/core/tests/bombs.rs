@@ -274,56 +274,81 @@ fn placement_uses_the_post_movement_cell_without_snapping() {
 }
 
 #[test]
-fn escape_never_approaches_the_bomb_even_if_the_endpoint_would_be_farther_away() {
+fn off_centre_placement_does_not_block_an_open_dead_end_retreat() {
     for assisted in [false, true] {
-        // Bomb centre is (384,128), so crossing it to x=144 would finish
-        // farther away than the starting x=400, but initially approaches it.
-        let rules = GameRules::new(192, 256)
-            .unwrap()
-            .with_turn_assistance(assisted);
-        let mut game = game("....", point(400, 128), rules, 0);
+        let mut game = game(
+            ".\n.",
+            point(160, 416),
+            GameRules::default().with_turn_assistance(assisted),
+            0,
+        );
         game.step(&[actions(None, true)]).unwrap();
-        let bomb = *game.bomb().unwrap();
-        game.step(&[actions(Some(Direction::Left), false)]).unwrap();
-        assert_eq!(game.character().position, point(400, 128));
-        assert_eq!(game.bomb(), Some(&bomb));
-        assert_eq!(game.tick(), 2); // blocked movement is still an ordinary tick
+        assert_eq!(game.bomb().unwrap().cell(), cell(0, 1));
+        assert_eq!(game.character().position, point(160, 416));
+        for _ in 0..16 {
+            game.step(&[actions(Some(Direction::Up), false)]).unwrap();
+        }
+        assert_eq!(game.character().position, point(160, 160));
+        assert_eq!(game.tick(), 17);
+        // This tiny Arena proves retreat, not Blast survival: both Cells will burn.
         assert_eq!(game.outcome(), None);
     }
 }
 
 #[test]
-fn overlapping_escape_allows_perpendicular_travel_but_not_a_turn_toward_the_centre() {
-    // Each start is 16 units beside (640,640). Perpendicular travel increases
-    // distance without needing a positive initial component in that direction.
+fn overlapping_escape_can_cross_the_bomb_centre_but_cannot_reenter_after_clearance() {
+    for assisted in [false, true] {
+        // One step crosses the Bomb centre (384,128) and fully clears its
+        // left edge at x=256. Returning must then stop at Footprint contact.
+        let rules = GameRules::new(192, 256)
+            .unwrap()
+            .with_turn_assistance(assisted);
+        let mut game = game("....", point(400, 128), rules, 0);
+        game.step(&[actions(None, true)]).unwrap();
+        game.step(&[actions(Some(Direction::Left), false)]).unwrap();
+        assert_eq!(game.character().position, point(144, 128));
+        game.step(&[actions(Some(Direction::Right), false)])
+            .unwrap();
+        assert_eq!(game.character().position, point(160, 128));
+        assert_eq!(game.bomb().unwrap().cell(), cell(1, 0));
+        assert_eq!(game.bomb().unwrap().detonate_at(), 121);
+        assert_eq!(game.tick(), 3); // shortened movement is still an ordinary tick
+        assert_eq!(game.outcome(), None);
+    }
+}
+
+#[test]
+fn overlapping_escape_allows_approach_perpendicular_travel_and_reversal() {
+    // Each start is 16 units beside (640,640). Approach the centre, travel
+    // perpendicular to the approach, then reverse without fully clearing.
     for (start, toward, perpendicular, returning, expected) in [
         (
             point(656, 640),
             Direction::Left,
             Direction::Up,
             Direction::Down,
-            point(656, 624),
+            point(640, 624),
         ),
         (
             point(640, 656),
             Direction::Up,
             Direction::Right,
             Direction::Left,
-            point(656, 656),
+            point(656, 640),
         ),
         (
             point(624, 640),
             Direction::Right,
             Direction::Down,
             Direction::Up,
-            point(624, 656),
+            point(640, 656),
         ),
         (
             point(640, 624),
             Direction::Down,
             Direction::Left,
             Direction::Right,
-            point(624, 624),
+            point(624, 640),
         ),
     ] {
         for assisted in [false, true] {
@@ -336,9 +361,9 @@ fn overlapping_escape_allows_perpendicular_travel_but_not_a_turn_toward_the_cent
             game.step(&[actions(None, true)]).unwrap();
             let mut sibling = game.clone(); // clone while permission still applies
             for (direction, position) in [
-                (toward, start),
+                (toward, point(640, 640)),
                 (perpendicular, expected),
-                (returning, expected),
+                (returning, point(640, 640)),
             ] {
                 let frame = [actions(Some(direction), false)];
                 game.step(&frame).unwrap();
@@ -352,7 +377,7 @@ fn overlapping_escape_allows_perpendicular_travel_but_not_a_turn_toward_the_cent
 }
 
 #[test]
-fn assistance_cannot_approach_during_its_correction_even_with_a_farther_endpoint() {
+fn assistance_can_approach_during_correction_and_forward_travel() {
     let mut game = game(
         "....\n.#..\n....\n....",
         point(608, 528),
@@ -360,35 +385,40 @@ fn assistance_cannot_approach_during_its_correction_even_with_a_farther_endpoint
         0,
     );
     game.step(&[actions(None, true)]).unwrap(); // centre (640,640)
-    // Left is blocked by the Wall. Without the escape constraint, assistance
-    // would go DOWN 80 then LEFT 176 to (432,608), farther from the Bomb,
-    // but its first segment approaches. The upward route is beyond 128 units.
+    // Left is blocked by the Wall. Assistance goes DOWN 80 then LEFT 176
+    // to (432,608), initially approaching the Bomb on both segments.
+    // The body's top stays at y=512: exact contact with the Wall is legal.
     game.step(&[actions(Some(Direction::Left), false)]).unwrap();
-    assert_eq!(game.character().position, point(608, 528));
+    assert_eq!(game.character().position, point(432, 608));
     assert_eq!(game.tick(), 2);
 }
 
 #[test]
-fn assistance_can_turn_toward_the_bomb_only_after_its_correction_fully_clears_it() {
+fn assistance_can_clear_a_bomb_at_its_bend_but_cannot_reenter_it() {
+    // A two-unit Footprint makes exact clearance at the bend fit in one tick.
     let mut game = game(
-        "....\n....\n....",
-        point(767, 270),
+        "....\n.#..\n....",
+        point(513, 270),
         GameRules::new(2, 64).unwrap(),
         0,
     );
-    game.step(&[actions(None, true)]).unwrap(); // centre (640,384)
-    // LEFT initially approaches, but UP 15 reaches y=255, with the body's
-    // bottom exactly at the Bomb's top. Permission ends at that bend, so the
-    // remaining LEFT 49 is legal along the edge, although distance decreases.
+    game.step(&[actions(None, true)]).unwrap(); // Bomb at (2,1)
+    // The Wall blocks LEFT. UP 15 clears both obstacles at y=255; LEFT 49
+    // then travels along their edge, with the body's bottom exactly at y=256.
     game.step(&[actions(Some(Direction::Left), false)]).unwrap();
-    assert_eq!(game.character().position, point(718, 255));
+    assert_eq!(game.character().position, point(464, 255));
+    game.step(&[actions(Some(Direction::Right), false)])
+        .unwrap();
+    assert_eq!(game.character().position, point(528, 255));
+    // DOWN would re-enter the Bomb. Neither end of the Wall/Bomb pair can
+    // be reached within the 128-unit correction limit, so assistance cannot help.
+    game.step(&[actions(Some(Direction::Down), false)]).unwrap();
+    assert_eq!(game.character().position, point(528, 255));
     assert_eq!(game.outcome(), None);
-    game.step(&[actions(Some(Direction::Left), false)]).unwrap();
-    assert_eq!(game.character().position, point(654, 255));
 }
 
 #[test]
-fn removal_discards_old_escape_constraints_and_a_replacement_gets_its_own_permission() {
+fn removal_discards_old_permissions_and_a_replacement_allows_its_own_passage() {
     let rules = GameRules::default()
         .with_turn_assistance(false)
         .with_bomb_parameters(4, 1, 1)
@@ -408,10 +438,10 @@ fn removal_discards_old_escape_constraints_and_a_replacement_gets_its_own_permis
     assert_eq!(game.character().position, point(504, 520));
     assert_eq!(game.bomb().unwrap().cell(), cell(1, 2));
     game.step(&[actions(Some(Direction::Down), false)]).unwrap();
-    assert_eq!(game.character().position, point(504, 520)); // toward new centre: blocked
+    assert_eq!(game.character().position, point(504, 536)); // toward new centre: permitted
     game.step(&[actions(Some(Direction::Right), false)])
         .unwrap();
-    assert_eq!(game.character().position, point(520, 520)); // old Bomb Cell is no obstacle
+    assert_eq!(game.character().position, point(520, 536)); // old Bomb Cell is no obstacle
     assert_eq!(game.outcome(), None);
 }
 
@@ -732,8 +762,10 @@ fn permission_ends_only_when_the_whole_footprint_leaves_the_bomb_cell() {
     assert_eq!(game.character().position, point(176, 128)); // body still overlaps by 16
     game.step(&[actions(Some(Direction::Right), false)])
         .unwrap();
-    assert_eq!(game.character().position, point(176, 128)); // approach blocked despite permission
-    game.step(&[actions(Some(Direction::Left), false)]).unwrap();
+    assert_eq!(game.character().position, point(192, 128)); // approach permitted while overlapping
+    for _ in 0..2 {
+        game.step(&[actions(Some(Direction::Left), false)]).unwrap();
+    }
     assert_eq!(game.character().position, point(160, 128)); // exact edge: fully clear
     game.step(&[actions(Some(Direction::Right), false)])
         .unwrap();
@@ -742,7 +774,7 @@ fn permission_ends_only_when_the_whole_footprint_leaves_the_bomb_cell() {
     game.step(&[actions(Some(Direction::Left), true)]).unwrap(); // full capacity is ordinary gameplay
     assert_eq!(game.character().position, point(144, 128));
     assert_eq!(game.bomb(), Some(&bomb));
-    assert_eq!(game.tick(), 18);
+    assert_eq!(game.tick(), 19);
 }
 
 #[test]
