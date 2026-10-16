@@ -10,7 +10,7 @@ For gameplay vocabulary, see [GLOSSARY.md](../GLOSSARY.md). The [simulation ADR]
 
 ## Roadmap
 
-1. **Expand gameplay in small verified increments.** Enemies, power-ups, additional arenas, and multi-bomb mechanics are candidates, not a fixed schedule. Reprioritize as the project develops.
+1. **Expand gameplay in small verified increments.** The next gameplay milestone is the [fuller generated first Normal level](https://github.com/qrilka/exploderous/issues/16), introducing enemies and Fire-up under the approved [game-state design](design/game-state.md). Additional arenas and multi-bomb mechanics remain later candidates, not a fixed schedule. Reprioritize as the project develops.
 2. **Add local competitive play before network play.** Introduce Battle and Versus before choosing network topology or synchronization behavior.
 3. **Evaluate other frontends and targets when concrete.** A graphical frontend, potentially Bevy, and browser support, potentially WebAssembly, remain options. Keep gameplay rules independent of presentation and transport.
 
