@@ -718,25 +718,11 @@ pub enum Outcome {
     Victory,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct BuroruWandering {
-    heading: Option<Direction>,
-    remaining: u32,
-}
-
-impl BuroruWandering {
-    pub fn heading(&self) -> Option<Direction> {
-        self.heading
-    }
-
-    /// Active travel ticks left in the current run; zero requests a decision at a centre.
-    pub fn remaining_ticks(&self) -> u32 {
-        self.remaining
-    }
-}
-
 // SplitMix64: the entire generator state is one word. Rejection avoids modulo bias.
 fn random_choice(state: &mut u64, count: u64) -> usize {
+    if count == 1 {
+        return 0;
+    }
     let threshold = count.wrapping_neg() % count;
     loop {
         *state = state.wrapping_add(0x9e3779b97f4a7c15);
@@ -756,7 +742,7 @@ pub struct Game {
     arena: Arena,
     character: Character,
     enemies: Vec<Character>,
-    wandering: BTreeMap<CharacterId, BuroruWandering>,
+    wandering: BTreeMap<CharacterId, Option<Direction>>,
     random_state: u64,
     tick: u64,
     rules: GameRules,
@@ -779,7 +765,7 @@ impl Game {
             wandering: scenario
                 .enemies
                 .iter()
-                .map(|enemy| (enemy.id, BuroruWandering::default()))
+                .map(|enemy| (enemy.id, None))
                 .collect(),
             random_state: scenario.random_seed,
             enemies: scenario.enemies,
@@ -996,7 +982,7 @@ impl Game {
     fn wander(
         &self,
         enemy: Character,
-        policy: &mut BuroruWandering,
+        heading: &mut Option<Direction>,
         random_state: &mut u64,
     ) -> Position {
         let start = enemy.position;
@@ -1027,34 +1013,45 @@ impl Game {
                     == start.advanced(direction, WORLD_UNITS_PER_CELL as u32)
             })
             .collect();
-            if policy.remaining == 0
-                || !policy
-                    .heading
-                    .is_some_and(|heading| legal.contains(&heading))
-            {
-                if legal.is_empty() {
-                    *policy = BuroruWandering::default();
-                    return start;
-                }
-                // Ascending CharacterId, then direction (U,R,D,L), then run duration.
-                policy.heading = Some(legal[random_choice(random_state, legal.len() as u64)]);
-                policy.remaining = (random_choice(random_state, 4) as u32 + 1)
-                    * WORLD_UNITS_PER_CELL as u32
-                    / BURORU_SPEED;
+            if legal.is_empty() {
+                return start;
             }
+            *heading = Some(match *heading {
+                None => legal[random_choice(random_state, legal.len() as u64)],
+                Some(forward) => {
+                    let perpendicular = match forward {
+                        Direction::Up | Direction::Down => [Direction::Right, Direction::Left],
+                        Direction::Right | Direction::Left => [Direction::Up, Direction::Down],
+                    };
+                    let sides: Vec<_> = perpendicular
+                        .into_iter()
+                        .filter(|direction| legal.contains(direction))
+                        .collect();
+                    if legal.contains(&forward) {
+                        if !sides.is_empty() && random_choice(random_state, 10) == 0 {
+                            sides[random_choice(random_state, sides.len() as u64)]
+                        } else {
+                            forward
+                        }
+                    } else {
+                        let reverse = match forward {
+                            Direction::Up => Direction::Down,
+                            Direction::Right => Direction::Left,
+                            Direction::Down => Direction::Up,
+                            Direction::Left => Direction::Right,
+                        };
+                        if legal.contains(&reverse)
+                            && (sides.is_empty() || random_choice(random_state, 4) != 0)
+                        {
+                            reverse
+                        } else {
+                            sides[random_choice(random_state, sides.len() as u64)]
+                        }
+                    }
+                }
+            });
         }
-        let Some(heading) = policy.heading else {
-            return start;
-        };
-        let destination = sweep(heading, BURORU_SPEED);
-        if destination != start.advanced(heading, BURORU_SPEED) {
-            // A new non-overlapping Bomb may block a route already in progress.
-            // Wait at contact; only a centre permits choosing a different heading.
-            policy.remaining = 0;
-        } else {
-            policy.remaining = policy.remaining.saturating_sub(1);
-        }
-        destination
+        heading.map_or(start, |direction| sweep(direction, BURORU_SPEED))
     }
 
     fn blast_coverage(&self, origin: CellCoord, reach: u64) -> Vec<CellCoord> {
@@ -1215,11 +1212,6 @@ impl Game {
             && self
                 .exit
                 .is_some_and(|cell| self.arena.terrain_at(cell) == Some(Terrain::Floor))
-    }
-
-    /// Read-only continuation policy for a living Buroru, absent for other identities.
-    pub fn buroru_wandering(&self, id: CharacterId) -> Option<&BuroruWandering> {
-        self.wandering.get(&id)
     }
 
     pub fn enemies(&self) -> &[Character] {
