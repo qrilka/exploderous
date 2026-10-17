@@ -30,26 +30,36 @@ pub fn reveal_fire_up(app: &mut App, now: &mut Instant) {
     ticks(app, now, 88);
 }
 
-// From (5,0), kill the three Buroru in column 8, then return to (5,0).
-// Uses only ordinary keyboard/time input and leaves Fire-up untouched.
-pub fn defeat_enemies(app: &mut App, now: &mut Instant) {
-    travel(app, now, KeyCode::Right, 48);
-    for (index, approach) in [16, 48, 48].into_iter().enumerate() {
-        travel(app, now, KeyCode::Down, approach);
-        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), *now);
-        ticks(app, now, 1);
-        travel(app, now, KeyCode::Up, 16);
-        travel(app, now, KeyCode::Left, 16);
-        ticks(app, now, 118); // through detonation and expiry
-        assert_eq!(app.game().outcome(), None);
-        assert_eq!(app.game().enemies().len(), 2 - index);
-        if index < 2 {
-            travel(app, now, KeyCode::Right, 16);
-        }
-    }
-    travel(app, now, KeyCode::Right, 16);
-    travel(app, now, KeyCode::Up, 64);
-    travel(app, now, KeyCode::Left, 48);
+// Outcome/UI fixture: one-Cell player steps and a short, long-reaching Bomb.
+// Enemies still use ordinary eight-unit wandering. Kill before they leave column 8,
+// then reveal the Exit. This avoids scripts that assume stationary enemies.
+pub fn objective_rules(assisted: bool) -> exploderous_core::game::GameRules {
+    exploderous_core::game::GameRules::new(192, 256)
+        .unwrap()
+        .with_turn_assistance(assisted)
+        .with_bomb_parameters(4, 13, 2)
+        .unwrap()
+}
+
+pub fn prepare_ready_exit(app: &mut App, now: &mut Instant) {
+    travel(app, now, KeyCode::Right, 8);
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), *now);
+    ticks(app, now, 1);
+    travel(app, now, KeyCode::Left, 2);
+    travel(app, now, KeyCode::Down, 1);
+    ticks(app, now, 3); // detonation and expiry
+    assert!(app.game().enemies().is_empty());
+    assert_eq!(app.game().outcome(), None);
+    travel(app, now, KeyCode::Up, 1);
+    travel(app, now, KeyCode::Left, 2);
+    travel(app, now, KeyCode::Down, 1);
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE), *now);
+    ticks(app, now, 1);
+    travel(app, now, KeyCode::Up, 1);
+    travel(app, now, KeyCode::Right, 2);
+    ticks(app, now, 3);
+    assert!(app.game().exit_ready());
+    assert_eq!(app.game().outcome(), None);
 }
 
 // Actual six-Block Level, default movement and Bomb timing, no privileged state changes.

@@ -2,7 +2,7 @@
 
 ## Summary
 
-**Yes: actual Bomberman enemy code evidences familiar approaches—persistent cardinal random movement, local alignment-based pursuit, and small stateful neighbor-selection heuristics.** The strongest inspected evidence is a community disassembly of **US NES Bomberman**, not PC Engine Buroru. It supports these algorithm families, but does not establish that PC Engine Bomberman, Bomberman ’93, NES II, or Saturn reuse them. The subsequent design interview selected timer-driven wandering without pursuit, informed by this evidence rather than claiming exact PC Engine fidelity.
+**Yes: actual Bomberman enemy code evidences familiar approaches—persistent cardinal random movement, local alignment-based pursuit, and small stateful neighbor-selection heuristics.** The strongest inspected evidence is a community disassembly of **US NES Bomberman**, not PC Engine Buroru. It supports these algorithm families, but does not establish that PC Engine Bomberman, Bomberman ’93, NES II, or Saturn reuse them. The initial design interview selected timer-driven wandering without pursuit, informed by this evidence rather than claiming exact PC Engine fidelity. Later playtesting selected the momentum-based policy now owned by the game-state design; the original-code findings below are historical evidence, not that policy’s probability specification.
 
 This note records research evidence and its limits, not normative gameplay requirements. The approved arena, generation, Buroru, Fire-up, bomb-escape, and objective rules belong to the [game-state design](../design/game-state.md). In particular, the selected boundary is separate presentation outside 13×13 stored gameplay cells, not a 15×15 terrain grid.
 
@@ -80,4 +80,4 @@ Bomb-as-obstacle is not fuse-aware danger avoidance. Pocket allowance makes dead
 
 ## Conclusion
 
-The approved policy uses **timer-driven persistent wandering**, without the pursuit overlay. It is not established as authentic PC Engine Buroru. No further fidelity research is required by the selected contract. If exact reproduction becomes a future requirement, the highest-value follow-up is a targeted PC Engine execution trace of one Buroru at an unobstructed junction, a dead end, and a bomb—not broader fan-code reading.
+The initial approved policy used **timer-driven persistent wandering**, without the pursuit overlay. It was not established as authentic PC Engine Buroru. Playtesting subsequently replaced it with momentum-based wandering; follow the current game-state design rather than the historical policy choice here. No further fidelity research is required by the selected contract. If exact reproduction becomes a future requirement, the highest-value follow-up is a targeted PC Engine execution trace of one Buroru at an unobstructed junction, a dead end, and a bomb—not broader fan-code reading.

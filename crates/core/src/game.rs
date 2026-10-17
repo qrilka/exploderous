@@ -1,6 +1,8 @@
 //! Deterministic movement, Bomb/Blast simulation, and validated game state.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+const BURORU_SPEED: u32 = 8;
 
 /// Simulation units, not pixels. Cell intervals are lower-inclusive, upper-exclusive.
 pub const WORLD_UNITS_PER_CELL: i32 = 256;
@@ -168,6 +170,7 @@ pub struct Scenario {
     rules: GameRules,
     exit: Option<CellCoord>,
     fire_up: Option<CellCoord>,
+    random_seed: u64,
 }
 
 impl Scenario {
@@ -192,11 +195,18 @@ impl Scenario {
             rules,
             exit: None,
             fire_up: None,
+            random_seed: 0,
         })
     }
 
-    /// Author stationary Buroru. Identities are unique, but overlapping Characters are legal.
-    pub fn with_enemies(mut self, enemies: Vec<Character>) -> Result<Self, ConstructionError> {
+    /// Set reproducible AI randomness before constructing the Game.
+    pub fn with_random_seed(mut self, seed: u64) -> Self {
+        self.random_seed = seed;
+        self
+    }
+
+    /// Author centred Buroru. Identities are unique; overlapping Characters are legal.
+    pub fn with_enemies(mut self, mut enemies: Vec<Character>) -> Result<Self, ConstructionError> {
         let mut identities = BTreeSet::from([self.character.id]);
         for enemy in &enemies {
             if !identities.insert(enemy.id) {
@@ -207,7 +217,17 @@ impl Scenario {
             }
             self.arena
                 .validate_start(enemy.position, GameRules::default())?;
+            if self
+                .arena
+                .cell_containing(enemy.position)
+                .and_then(|cell| self.arena.cell_center(cell))
+                != Some(enemy.position)
+            {
+                return Err(ConstructionError::InvalidStartingPosition);
+            }
         }
+        // Canonical identity order, independent of authored vector order.
+        enemies.sort_by_key(|enemy| enemy.id);
         self.enemies = enemies;
         Ok(self)
     }
@@ -624,11 +644,96 @@ impl Rect {
     }
 }
 
+// Actual paths share normalized tick time: constant speed while travelling, then rest.
+// Cell occupancy changes only at boundary events. Test each event (half-open edges)
+// and each open interval between them using exact rational times, never floats.
+struct Motion {
+    points: [Position; 3],
+    speed: u32,
+}
+
+fn segment_length(start: Position, end: Position) -> i64 {
+    i64::from((end.x.0 - start.x.0).abs() + (end.y.0 - start.y.0).abs())
+}
+
+impl Motion {
+    fn cell_at(&self, arena: &Arena, numerator: i64, denominator: i64) -> Option<CellCoord> {
+        let mut budget = i64::from(self.speed) * numerator;
+        let mut x = i64::from(self.points[0].x.0) * denominator;
+        let mut y = i64::from(self.points[0].y.0) * denominator;
+        for pair in self.points.windows(2) {
+            let distance = segment_length(pair[0], pair[1]) * denominator;
+            let travelled = budget.min(distance);
+            x += i64::from((pair[1].x.0 - pair[0].x.0).signum()) * travelled;
+            y += i64::from((pair[1].y.0 - pair[0].y.0).signum()) * travelled;
+            budget -= travelled;
+        }
+        arena.cell_containing(Position::new(
+            WorldX::new((x / denominator) as i32),
+            WorldY::new((y / denominator) as i32),
+        ))
+    }
+
+    fn boundary_times(&self, times: &mut Vec<(i64, i64)>) {
+        let mut travelled = 0;
+        for pair in self.points.windows(2) {
+            for (start, end) in [(pair[0].x.0, pair[1].x.0), (pair[0].y.0, pair[1].y.0)] {
+                if start == end {
+                    continue;
+                }
+                let first = start.min(end).div_euclid(WORLD_UNITS_PER_CELL) + 1;
+                let last = start.max(end).div_euclid(WORLD_UNITS_PER_CELL);
+                // Also include a segment starting exactly on an edge while moving negative.
+                if start % WORLD_UNITS_PER_CELL == 0 {
+                    times.push((travelled, i64::from(self.speed)));
+                }
+                for cell in first..=last {
+                    let distance = (cell * WORLD_UNITS_PER_CELL - start).abs();
+                    times.push((travelled + i64::from(distance), i64::from(self.speed)));
+                }
+            }
+            travelled += segment_length(pair[0], pair[1]);
+        }
+    }
+
+    fn contacts(&self, other: &Self, arena: &Arena) -> bool {
+        let mut times = vec![(0, 1), (1, 1)];
+        self.boundary_times(&mut times);
+        other.boundary_times(&mut times);
+        times.sort_by(|&(a, b), &(c, d)| (a * d).cmp(&(c * b)));
+        times.dedup_by(|&mut (a, b), &mut (c, d)| a * d == c * b);
+        let same_cell = |n, d| self.cell_at(arena, n, d) == other.cell_at(arena, n, d);
+        times.iter().any(|&(n, d)| same_cell(n, d))
+            || times.windows(2).any(|pair| {
+                let [(a, b), (c, d)] = [pair[0], pair[1]];
+                same_cell(a * d + c * b, 2 * b * d)
+            })
+    }
+}
+
 /// Terminal result of a run. A new Game starts without an outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     Defeat,
     Victory,
+}
+
+// SplitMix64: the entire generator state is one word. Rejection avoids modulo bias.
+fn random_choice(state: &mut u64, count: u64) -> usize {
+    if count == 1 {
+        return 0;
+    }
+    let threshold = count.wrapping_neg() % count;
+    loop {
+        *state = state.wrapping_add(0x9e3779b97f4a7c15);
+        let mut value = *state;
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+        value ^= value >> 31;
+        if value >= threshold {
+            return (value % count) as usize;
+        }
+    }
 }
 
 /// Complete simulation state. Equality and cloning include every authoritative field.
@@ -637,6 +742,8 @@ pub struct Game {
     arena: Arena,
     character: Character,
     enemies: Vec<Character>,
+    wandering: BTreeMap<CharacterId, Option<Direction>>,
+    random_state: u64,
     tick: u64,
     rules: GameRules,
     bomb: Option<Bomb>,
@@ -655,6 +762,12 @@ impl Game {
         Self {
             arena: scenario.arena,
             character: scenario.character,
+            wandering: scenario
+                .enemies
+                .iter()
+                .map(|enemy| (enemy.id, None))
+                .collect(),
+            random_state: scenario.random_seed,
             enemies: scenario.enemies,
             tick: initial_tick,
             rules: scenario.rules,
@@ -695,6 +808,16 @@ impl Game {
             return Ok(());
         }
         let next_tick = self.tick.checked_add(1).ok_or(StepError::TickExhausted)?;
+        // Stage policy and RNG with movement: deadline failure must roll back decisions too.
+        let mut random_state = self.random_state;
+        let mut wandering = self.wandering.clone();
+        let mut enemies = self.enemies.clone();
+        for enemy in &mut enemies {
+            let policy = wandering
+                .get_mut(&enemy.id)
+                .expect("living enemy has policy");
+            enemy.position = self.wander(*enemy, policy, &mut random_state);
+        }
         let start = self.character.position;
         let [bend, position] = frame
             .first()
@@ -707,13 +830,35 @@ impl Game {
         };
         let path_harmed = self.blasts.iter().any(|blast| {
             blast.expires_at > next_tick && blast.cells.iter().copied().any(path_touches)
-        }) || self.enemies.iter().any(|enemy| {
-            path_touches(
-                self.arena
-                    .cell_containing(enemy.position)
-                    .expect("enemy stays in Arena"),
+        }) || self.enemies.iter().zip(&enemies).any(|(before, after)| {
+            Motion {
+                points: [start, bend, position],
+                speed: self.rules.movement_distance,
+            }
+            .contacts(
+                &Motion {
+                    points: [before.position, before.position, after.position],
+                    speed: BURORU_SPEED,
+                },
+                &self.arena,
             )
         });
+        let enemy_path_hits: BTreeSet<_> = self
+            .enemies
+            .iter()
+            .zip(&enemies)
+            .filter(|(before, after)| {
+                self.blasts.iter().any(|blast| {
+                    blast.expires_at > next_tick
+                        && blast.cells.iter().any(|&cell| {
+                            self.arena
+                                .cell_bounds(cell)
+                                .intersects_centre_segment(before.position, after.position)
+                        })
+                })
+            })
+            .map(|(before, _)| before.id)
+            .collect();
         let final_cell = self
             .arena
             .cell_containing(position)
@@ -737,7 +882,7 @@ impl Game {
                     position,
                     ..self.character
                 })
-                .chain(self.enemies.iter().copied())
+                .chain(enemies.iter().copied())
                 .filter(|character| {
                     let rules = if character.kind == CharacterKind::Buroru {
                         GameRules::default()
@@ -773,6 +918,19 @@ impl Game {
             None
         };
         // Everything fallible is checked before committing any live-state changes.
+        self.enemies = enemies;
+        self.wandering = wandering;
+        self.random_state = random_state;
+        if let Some(bomb) = &mut bomb {
+            bomb.escape_allowed.retain(|id| {
+                *id == self.character.id
+                    || self.enemies.iter().any(|enemy| {
+                        enemy.id == *id
+                            && Rect::footprint(enemy.position, GameRules::default())
+                                .overlaps(self.arena.cell_bounds(bomb.cell))
+                    })
+            });
+        }
         self.blasts.retain(|blast| blast.expires_at > next_tick);
         self.character.position = position;
         if collects_fire_up {
@@ -802,8 +960,11 @@ impl Game {
                 .arena
                 .cell_containing(enemy.position)
                 .expect("enemy stays in Arena");
-            !self.blasts.iter().any(|blast| blast.cells.contains(&cell))
+            !enemy_path_hits.contains(&enemy.id)
+                && !self.blasts.iter().any(|blast| blast.cells.contains(&cell))
         });
+        self.wandering
+            .retain(|id, _| self.enemies.iter().any(|enemy| enemy.id == *id));
         if path_harmed
             || self
                 .blasts
@@ -816,6 +977,81 @@ impl Game {
         }
         self.tick = next_tick;
         Ok(())
+    }
+
+    fn wander(
+        &self,
+        enemy: Character,
+        heading: &mut Option<Direction>,
+        random_state: &mut u64,
+    ) -> Position {
+        let start = enemy.position;
+        let sweep = |direction, distance| {
+            self.swept_character_position(
+                enemy.id,
+                GameRules::default(),
+                start,
+                direction,
+                distance,
+            )
+        };
+        let centre = self
+            .arena
+            .cell_containing(start)
+            .and_then(|cell| self.arena.cell_center(cell))
+            == Some(start);
+        if centre {
+            let legal: Vec<_> = [
+                Direction::Up,
+                Direction::Right,
+                Direction::Down,
+                Direction::Left,
+            ]
+            .into_iter()
+            .filter(|&direction| {
+                sweep(direction, WORLD_UNITS_PER_CELL as u32)
+                    == start.advanced(direction, WORLD_UNITS_PER_CELL as u32)
+            })
+            .collect();
+            if legal.is_empty() {
+                return start;
+            }
+            *heading = Some(match *heading {
+                None => legal[random_choice(random_state, legal.len() as u64)],
+                Some(forward) => {
+                    let perpendicular = match forward {
+                        Direction::Up | Direction::Down => [Direction::Right, Direction::Left],
+                        Direction::Right | Direction::Left => [Direction::Up, Direction::Down],
+                    };
+                    let sides: Vec<_> = perpendicular
+                        .into_iter()
+                        .filter(|direction| legal.contains(direction))
+                        .collect();
+                    if legal.contains(&forward) {
+                        if !sides.is_empty() && random_choice(random_state, 10) == 0 {
+                            sides[random_choice(random_state, sides.len() as u64)]
+                        } else {
+                            forward
+                        }
+                    } else {
+                        let reverse = match forward {
+                            Direction::Up => Direction::Down,
+                            Direction::Right => Direction::Left,
+                            Direction::Down => Direction::Up,
+                            Direction::Left => Direction::Right,
+                        };
+                        if legal.contains(&reverse)
+                            && (sides.is_empty() || random_choice(random_state, 4) != 0)
+                        {
+                            reverse
+                        } else {
+                            sides[random_choice(random_state, sides.len() as u64)]
+                        }
+                    }
+                }
+            });
+        }
+        heading.map_or(start, |direction| sweep(direction, BURORU_SPEED))
     }
 
     fn blast_coverage(&self, origin: CellCoord, reach: u64) -> Vec<CellCoord> {
@@ -888,19 +1124,30 @@ impl Game {
     }
 
     fn swept_position(&self, start: Position, direction: Direction, distance: u32) -> Position {
+        self.swept_character_position(self.character.id, self.rules, start, direction, distance)
+    }
+
+    fn swept_character_position(
+        &self,
+        id: CharacterId,
+        rules: GameRules,
+        start: Position,
+        direction: Direction,
+        distance: u32,
+    ) -> Position {
         // Re-evaluate at each segment's start, including speculative assistance.
         // A cardinal segment cannot re-enter after clearing; the next segment
         // treats the Bomb as solid even before the tick commits its permission.
         let escaping_bomb = self.bomb.as_ref().filter(|bomb| {
-            bomb.escape_allowed_for(self.character.id)
-                && Rect::footprint(start, self.rules).overlaps(self.arena.cell_bounds(bomb.cell))
+            bomb.escape_allowed_for(id)
+                && Rect::footprint(start, rules).overlaps(self.arena.cell_bounds(bomb.cell))
         });
-        let half = i64::from(self.rules.footprint_side / 2);
+        let half = i64::from(rules.footprint_side / 2);
         let distance = i64::from(distance);
         let cell = i64::from(WORLD_UNITS_PER_CELL);
         let mut x = i64::from(start.x().value());
         let mut y = i64::from(start.y().value());
-        let mut swept = Rect::footprint(start, self.rules);
+        let mut swept = Rect::footprint(start, rules);
         // Clip to the arena, then inspect every cell with positive-area swept overlap.
         // Cardinal motion leaves the perpendicular interval unchanged, so each such
         // obstacle limits the centre to its near face plus/minus the footprint radius.

@@ -135,7 +135,7 @@ fn contact_uses_half_open_centre_cells_and_the_whole_travelled_path() {
         scenario(
             point(255, 128),
             GameRules::default(),
-            vec![enemy(7, point(256, 128))],
+            vec![enemy(7, point(384, 128))],
         ),
         0,
     );
@@ -207,7 +207,13 @@ fn one_hit_kills_preserve_unrelated_identities_and_clone_independence() {
     game.step(&[action(None, true)]).unwrap();
     let mut sibling = game.clone();
     game.step(&[action(Some(Left), false)]).unwrap();
-    assert_eq!(game.enemies(), &[enemy(99, point(1152, 640))]);
+    assert_eq!(
+        game.enemies()
+            .iter()
+            .map(|enemy| enemy.id)
+            .collect::<Vec<_>>(),
+        vec![CharacterId::new(99)]
+    );
     assert_eq!(game.fire_up(), Some(cell(4, 2))); // Buroru cannot collect an exposed Item.
     assert_eq!(game.outcome(), None); // Exit still locked by the unrelated survivor.
     assert!(!game.exit_ready());
@@ -218,7 +224,13 @@ fn one_hit_kills_preserve_unrelated_identities_and_clone_independence() {
         game.step(&[]).unwrap();
     }
     assert!(game.blasts().is_empty());
-    assert_eq!(game.enemies(), &[enemy(99, point(1152, 640))]);
+    assert_eq!(
+        game.enemies()
+            .iter()
+            .map(|enemy| enemy.id)
+            .collect::<Vec<_>>(),
+        vec![CharacterId::new(99)]
+    );
     assert_eq!(Game::new(initial, 0).enemies().len(), 3);
 }
 
@@ -280,86 +292,79 @@ fn contact_cannot_be_undone_by_killing_the_last_enemy_later_in_the_tick() {
 }
 
 #[test]
-fn new_blast_hits_use_enemy_centres_not_overlapping_footprints() {
+fn new_blast_hits_use_moving_enemy_centres_not_overlapping_footprints() {
     use exploderous_core::game::Direction::Right;
-    let rules = GameRules::new(192, 512)
-        .unwrap()
-        .with_bomb_parameters(1, 1, 3)
-        .unwrap();
-    let mut game = Game::new(
-        scenario(
-            point(640, 384),
-            rules,
-            vec![enemy(7, point(255, 384)), enemy(42, point(256, 384))],
-        ),
-        0,
-    );
-    game.step(&[action(None, true)]).unwrap();
-    game.step(&[action(Some(Right), false)]).unwrap();
-    assert_eq!(game.outcome(), None);
-    assert_eq!(game.enemies(), &[enemy(7, point(255, 384))]);
+    for (fuse, lifetime, dies) in [(14, 1, false), (14, 2, false), (15, 1, true)] {
+        let rules = GameRules::new(192, 512)
+            .unwrap()
+            .with_bomb_parameters(fuse, 1, lifetime)
+            .unwrap();
+        let mut terrain = vec![Terrain::Wall; 15];
+        terrain[5..10].fill(Terrain::Floor);
+        let initial = Scenario::new(5, 3, terrain, bomber(point(640, 384)), rules)
+            .unwrap()
+            .with_enemies(vec![enemy(7, point(128, 384))])
+            .unwrap();
+        let mut game = Game::new(initial, 0);
+        game.step(&[action(None, true)]).unwrap();
+        game.step(&[action(Some(Right), false)]).unwrap();
+        for _ in 2..=fuse {
+            game.step(&[]).unwrap();
+        }
+        assert_eq!(game.outcome(), None);
+        assert_eq!(game.enemies().is_empty(), dies);
+        if !dies {
+            assert_eq!(game.enemies()[0].position, point(248, 384));
+            // Expiry precedes movement; a still-live effect instead kills at entry.
+            game.step(&[]).unwrap();
+            if lifetime == 1 {
+                assert_eq!(game.enemies()[0].position, point(256, 384));
+            } else {
+                assert!(game.enemies().is_empty());
+            }
+        }
+    }
 }
 
 #[test]
 fn bomb_passage_is_per_character_and_belongs_only_to_the_current_bomb() {
-    use exploderous_core::game::Direction::{Left, Right};
-    let rules = GameRules::new(192, 256)
+    use exploderous_core::game::Direction::Right;
+    let rules = GameRules::new(2, 512)
         .unwrap()
-        .with_bomb_parameters(5, 1, 2)
+        .with_bomb_parameters(2, 1, 1)
         .unwrap();
-    // The enemy's centre stays in the next Cell, but its canonical 192-unit body overlaps.
-    let initial = scenario(
-        point(384, 384),
-        rules,
-        vec![
-            enemy(7, point(528, 384)),
-            enemy(8, point(528, 528)),
-            enemy(42, point(608, 384)),
-            enemy(99, point(1152, 640)),
-        ],
-    );
+    let mut terrain = vec![Terrain::Floor; 7 * 3];
+    terrain[7..14].fill(Terrain::Wall);
+    let initial = Scenario::new(7, 3, terrain, bomber(point(384, 128)), rules)
+        .unwrap()
+        .with_enemies(vec![enemy(7, point(128, 128)), enemy(99, point(128, 640))])
+        .unwrap();
     let mut game = Game::new(initial, 0);
+    for _ in 0..8 {
+        game.step(&[]).unwrap();
+    }
     game.step(&[action(None, true)]).unwrap();
     let bomb = game.bomb().unwrap();
     assert!(bomb.escape_allowed_for(CharacterId::new(0)));
-    assert!(bomb.escape_allowed_for(CharacterId::new(7)));
-    assert!(bomb.escape_allowed_for(CharacterId::new(8))); // Corner overlap also grants passage.
-    assert!(!bomb.escape_allowed_for(CharacterId::new(42))); // Exact body-edge contact is not overlap.
+    assert!(bomb.escape_allowed_for(CharacterId::new(7))); // Centre in Cell 0, body in Cell 1.
     assert!(!bomb.escape_allowed_for(CharacterId::new(99)));
-    assert!(!bomb.escape_allowed_for(CharacterId::new(123)));
     let mut sibling = game.clone();
-    game.step(&[action(Some(Left), false)]).unwrap();
-    assert!(!game.bomb().unwrap().escape_allowed_for(CharacterId::new(0)));
-    assert!(game.bomb().unwrap().escape_allowed_for(CharacterId::new(7)));
-    assert!(
-        sibling
-            .bomb()
-            .unwrap()
-            .escape_allowed_for(CharacterId::new(0))
-    );
-    sibling.step(&[action(Some(Left), false)]).unwrap();
-    assert_eq!(game, sibling);
-    game.step(&[action(Some(Right), false)]).unwrap();
-    assert_eq!(game.character().position, point(160, 384)); // Re-entry is blocked.
-    game.step(&[action(Some(exploderous_core::game::Direction::Up), false)])
-        .unwrap();
     for _ in 0..2 {
-        game.step(&[]).unwrap();
+        game.step(&[action(Some(Right), false)]).unwrap();
+        sibling.step(&[action(Some(Right), false)]).unwrap();
+        assert_eq!(game, sibling);
     }
-    assert_eq!(game.outcome(), None);
     assert!(game.bomb().is_none());
-    assert_eq!(
-        game.enemies(),
-        &[enemy(8, point(528, 528)), enemy(99, point(1152, 640))]
+    assert!(
+        !game
+            .enemies()
+            .iter()
+            .any(|enemy| enemy.id == CharacterId::new(7))
     );
-    for _ in 0..2 {
-        game.step(&[]).unwrap();
-    }
     game.step(&[action(None, true)]).unwrap();
     let replacement = game.bomb().unwrap();
     assert!(replacement.escape_allowed_for(CharacterId::new(0)));
     assert!(!replacement.escape_allowed_for(CharacterId::new(7)));
-    assert!(!replacement.escape_allowed_for(CharacterId::new(8))); // Surviving old permission cannot alias.
     assert!(!replacement.escape_allowed_for(CharacterId::new(99)));
 }
 
@@ -386,6 +391,7 @@ fn scenario_validation_owns_identity_control_and_canonical_enemy_footprints() {
         point(384, 128),
         point(640, 128),
         point(255, 128),
+        point(96, 384), // Legal Footprint, but an off-centre authored start.
     ] {
         assert_eq!(
             initial.clone().with_enemies(vec![enemy(7, position)]),
@@ -419,9 +425,9 @@ fn scenario_validation_owns_identity_control_and_canonical_enemy_footprints() {
             Err(ConstructionError::InvalidCharacterControl)
         );
     }
-    // Canonical enemy Footprint has radius 96 even with a tiny bomber Footprint.
+    // Canonical enemy Footprint remains independent of the tiny bomber Footprint.
     let legal = initial
-        .with_enemies(vec![enemy(u32::MAX, point(96, 384))])
+        .with_enemies(vec![enemy(u32::MAX, point(128, 384))])
         .unwrap();
     assert_eq!(
         Game::new(legal, 0).enemies()[0].id,
@@ -441,7 +447,7 @@ fn deadline_failures_preserve_enemies_items_and_per_character_permissions() {
             true,
         ),
     ] {
-        let initial = scenario(point(384, 384), rules, vec![enemy(7, point(528, 384))])
+        let initial = scenario(point(384, 384), rules, vec![enemy(7, point(640, 384))])
             .with_fire_up(cell(1, 1))
             .unwrap();
         let mut game = Game::new(initial, tick);
@@ -458,7 +464,7 @@ fn deadline_failures_preserve_enemies_items_and_per_character_permissions() {
 }
 
 #[test]
-fn stationary_enemies_lock_the_exit_and_share_cells_without_harming_one_another() {
+fn wandering_enemies_lock_the_exit_and_can_initially_share_cells() {
     let enemies = vec![enemy(7, point(640, 128)), enemy(99, point(640, 128))];
     let scenario = Scenario::new(
         4,
@@ -477,7 +483,14 @@ fn stationary_enemies_lock_the_exit_and_share_cells_without_harming_one_another(
     for _ in 0..10 {
         game.step(&[]).unwrap();
     }
-    assert_eq!(game.enemies(), enemies);
+    assert_eq!(game.enemies().len(), 2);
+    assert!(
+        game.enemies()
+            .iter()
+            .zip(&enemies)
+            .all(|(after, before)| after.id == before.id)
+    );
+    assert_ne!(game.enemies(), enemies);
     assert_eq!(game.character(), &bomber(point(128, 128)));
     assert_eq!(game.outcome(), None);
     assert_eq!(game.tick(), 10);
