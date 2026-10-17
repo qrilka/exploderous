@@ -4,9 +4,9 @@ Exploderous is a Bomberman-inspired game about navigating grid arenas, placing b
 
 ## Language
 
-**Normal**:
+**Normal mode**:
 The single-player mode built around completing objective-based levels.
-_Avoid_: Campaign mode
+_Avoid_: Normal without “mode”, Campaign mode
 
 **Battle**:
 The competitive mode with configurable arenas and human or computer-controlled participants.
@@ -22,7 +22,7 @@ _Avoid_: Actor
 A computer-controlled character, including both AI-controlled competitors and enemies.
 
 **Buroru**:
-A wandering enemy kind in Normal.
+A wandering enemy kind in Normal mode.
 
 **Arena**:
 The grid-shaped playing area containing terrain, characters, bombs, and other gameplay objects.
@@ -78,4 +78,4 @@ _Avoid_: Pickup
 An item that increases a bomber's blast reach.
 
 **Exit**:
-The destination a player must reach to complete a Normal level once its completion conditions are satisfied.
+The destination a player must reach to complete a level in Normal mode once its completion conditions are satisfied.

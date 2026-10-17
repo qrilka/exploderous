@@ -10,11 +10,11 @@ For gameplay vocabulary, see [GLOSSARY.md](../GLOSSARY.md). The [simulation ADR]
 
 ## Roadmap
 
-1. **Expand gameplay in small verified increments.** The next gameplay milestone is the [fuller generated first Normal level](https://github.com/qrilka/exploderous/issues/16), introducing enemies and Fire-up under the approved [game-state design](design/game-state.md). Additional arenas and multi-bomb mechanics remain later candidates, not a fixed schedule. Reprioritize as the project develops.
+1. **Expand gameplay in small verified increments.** Build on the [generated level for Normal mode](https://github.com/qrilka/exploderous/issues/16) under the approved [game-state design](design/game-state.md). Additional arenas and multi-bomb mechanics remain later candidates, not a fixed schedule. Reprioritize as the project develops.
 2. **Add local competitive play before network play.** Introduce Battle and Versus before choosing network topology or synchronization behavior.
 3. **Evaluate other frontends and targets when concrete.** A graphical frontend, potentially Bevy, and browser support, potentially WebAssembly, remain options. Keep gameplay rules independent of presentation and transport.
 
-The [Bomberman ’93 manual](https://dds.konami.com/games/manual/pcemini/en_Bomber93.pdf) is one reference, not an exhaustive specification. Exploderous treats Normal, Battle, and Versus as separate gameplay presets; detailed mode rules and participant limits are settled when those capabilities are planned.
+The [Bomberman ’93 manual](https://dds.konami.com/games/manual/pcemini/en_Bomber93.pdf) is one reference, not an exhaustive specification. Exploderous distinguishes Normal mode, Battle, and Versus; detailed mode rules and participant limits are settled when those capabilities are planned.
 
 ## Verification strategy
 
