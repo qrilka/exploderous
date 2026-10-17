@@ -29,8 +29,12 @@ fn screen(terminal: &Terminal<TestBackend>) -> Vec<String> {
 #[test]
 fn game_over_modal_overlays_the_arena_at_minimum_size_and_is_removed_on_restart() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 17);
-    let initial = screen(&draw(&app, 19, 17));
+    let mut app = support::app(start, 19, 17);
+    let initial = screen(&draw(
+        &support::generated_app(start, 19, 17, Default::default()),
+        19,
+        17,
+    ));
     app.handle_key(key(KeyCode::Char(' ')), start);
     for tick in 1..=121 {
         app.advance(start + TICK_INTERVAL * tick).unwrap();
@@ -67,12 +71,21 @@ fn game_over_modal_overlays_the_arena_at_minimum_size_and_is_removed_on_restart(
 #[test]
 fn centered_map_has_thirteen_playable_cells_inside_a_separate_frame() {
     for (width, height, left, top) in [(19, 17, 2, 0), (30, 20, 7, 1), (80, 30, 32, 6)] {
-        let app = App::new(Instant::now(), width, height);
+        let app = App::new_with_seed(Instant::now(), width, height, Default::default(), 42);
         let terminal = draw(&app, width, height);
         let buffer = terminal.backend().buffer();
-        let exit = app.game().exit().expect("the Normal level has an Exit");
-        assert_eq!((exit.column().value(), exit.row().value()), (4, 2));
-        assert!(!screen(&terminal).join("\n").contains('⬚'));
+        let text = screen(&terminal).join("\n");
+        assert!(!text.contains('⬚'));
+        assert!(!text.contains('▧'));
+        assert!(!text.contains('◈'));
+        assert_eq!(
+            text.lines()
+                .take(usize::from(top + 15))
+                .flat_map(str::chars)
+                .filter(|&glyph| glyph == 'e')
+                .count(),
+            3
+        );
         for offset in 0..15 {
             assert_eq!(buffer[(left + offset, top)].symbol(), "▓");
             assert_eq!(buffer[(left + offset, top + 14)].symbol(), "▓");
@@ -108,7 +121,11 @@ fn centered_map_has_thirteen_playable_cells_inside_a_separate_frame() {
                 .iter()
                 .filter(|cell| cell.symbol() == "▒")
                 .count(),
-            6
+            app.game()
+                .arena()
+                .cells()
+                .filter(|(_, terrain)| *terrain == exploderous_core::game::Terrain::Block)
+                .count()
         );
         let rows = screen(&terminal);
         assert_eq!(rows[usize::from(top + 15)].trim(), "Blast reach: 1");
@@ -119,7 +136,7 @@ fn centered_map_has_thirteen_playable_cells_inside_a_separate_frame() {
 #[test]
 fn blast_origins_and_both_arm_directions_use_live_glyphs_without_hiding_walls() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 17);
+    let mut app = support::app(start, 19, 17);
     app.handle_key(key(KeyCode::Char(' ')), start);
     app.handle_key(key(KeyCode::Right), start);
     for tick in 1..=32 {
@@ -150,7 +167,7 @@ fn blast_origins_and_both_arm_directions_use_live_glyphs_without_hiding_walls() 
 #[test]
 fn a_bomb_clears_a_passage_and_its_blast_covers_the_destroyed_block() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 17);
+    let mut app = support::app(start, 19, 17);
     let mut tick = 0;
     // Reach (1,2), next to the Block at (2,2), through ordinary input.
     for (code, count) in [(KeyCode::Down, 32), (KeyCode::Right, 16)] {
@@ -205,14 +222,18 @@ fn a_bomb_clears_a_passage_and_its_blast_covers_the_destroyed_block() {
     app.handle_key(key(KeyCode::Char('r')), start + TICK_INTERVAL * tick);
     assert_eq!(
         screen(&draw(&app, 19, 17)),
-        screen(&draw(&App::new(start, 19, 17), 19, 17))
+        screen(&draw(
+            &support::generated_app(start, 19, 17, Default::default()),
+            19,
+            17
+        ))
     );
 }
 
 #[test]
 fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() {
     let mut now = Instant::now();
-    let mut app = App::new(now, 19, 17);
+    let mut app = support::app(now, 19, 17);
     support::reveal_exit(&mut app, &mut now);
     assert_eq!(app.game().outcome(), None);
     assert_eq!(app.game().tick(), 201);
@@ -237,7 +258,7 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
         );
     }
     let rules = support::objective_rules(true);
-    let mut app = App::new_with_rules(now, 19, 17, rules);
+    let mut app = support::app_with_rules(now, 19, 17, rules);
     support::prepare_ready_exit(&mut app, &mut now);
     assert_eq!(draw(&app, 19, 17).backend().buffer()[(7, 3)].symbol(), "⬚");
     for (width, height, left, top) in [(19, 17, 2, 0), (80, 30, 32, 6)] {
@@ -281,14 +302,132 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
     app.handle_key(key(KeyCode::Char('r')), now);
     assert_eq!(
         screen(&draw(&app, 19, 17)),
-        screen(&draw(&App::new_with_rules(now, 19, 17, rules), 19, 17))
+        screen(&draw(&support::generated_app(now, 19, 17, rules), 19, 17))
     );
+}
+
+#[test]
+fn small_scenario_outcomes_are_centered_without_bypassing_terminal_size_checks() {
+    use exploderous_core::game::{
+        CellCoord, Character, CharacterId, CharacterKind, Column, ControlSource, GameRules,
+        Outcome, Position, Row, Scenario, Terrain, WorldX, WorldY,
+    };
+    for arena_height in [1, 2] {
+        for outcome in [Outcome::Defeat, Outcome::Victory] {
+            let mut now = Instant::now();
+            let rules = GameRules::default().with_bomb_parameters(1, 1, 30).unwrap();
+            let mut scenario = Scenario::new(
+                1,
+                arena_height,
+                vec![Terrain::Floor; arena_height as usize],
+                Character {
+                    id: CharacterId::new(0),
+                    position: Position::new(WorldX::new(128), WorldY::new(128)),
+                    kind: CharacterKind::Bomber,
+                    control: ControlSource::Human,
+                },
+                rules,
+            )
+            .unwrap();
+            if outcome == Outcome::Victory {
+                scenario = scenario
+                    .with_exit(CellCoord::new(Column::new(0), Row::new(0)))
+                    .unwrap();
+            }
+            let mut app = App::from_scenario(now, 19, 16, scenario, 0);
+            assert!(
+                screen(&draw(&app, 19, 16))
+                    .join("\n")
+                    .contains("Resize terminal")
+            );
+            support::ticks(&mut app, &mut now, 10);
+            assert_eq!(app.game().tick(), 0);
+            app.set_terminal_size(19, 17, now);
+            if outcome == Outcome::Defeat {
+                app.handle_key(key(KeyCode::Char(' ')), now);
+            }
+            support::ticks(&mut app, &mut now, 2);
+            assert_eq!(app.game().outcome(), Some(outcome));
+            let title = match outcome {
+                Outcome::Defeat => "│    GAME OVER    │",
+                Outcome::Victory => "│    VICTORY!     │",
+            };
+            // Literal positions at both supported sizes, including even-height
+            // framed Arenas where the central row is the lower of the two middles.
+            let large_top = if arena_height == 1 { 11 } else { 12 };
+            for (width, height, left, top) in [(19, 17, 0, 5), (80, 30, 30, large_top)] {
+                let rows = screen(&draw(&app, width, height));
+                for (line, expected) in [
+                    "┌─────────────────┐",
+                    title,
+                    "│   R: restart    │",
+                    "│   Q/Esc: quit   │",
+                    "└─────────────────┘",
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    assert_eq!(
+                        rows[top + line]
+                            .chars()
+                            .skip(left)
+                            .take(19)
+                            .collect::<String>(),
+                        expected
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn an_explicit_larger_scenario_pauses_until_its_own_frame_fits() {
+    use exploderous_core::game::{
+        Character, CharacterId, CharacterKind, ControlSource, GameRules, Position, Scenario,
+        Terrain, WorldX, WorldY,
+    };
+    let now = Instant::now();
+    let scenario = Scenario::new(
+        21,
+        18,
+        vec![Terrain::Floor; 21 * 18],
+        Character {
+            id: CharacterId::new(0),
+            position: Position::new(WorldX::new(128), WorldY::new(128)),
+            kind: CharacterKind::Bomber,
+            control: ControlSource::Human,
+        },
+        GameRules::default(),
+    )
+    .unwrap();
+    let mut app = App::from_scenario(now, 19, 17, scenario, 0);
+    assert!(
+        screen(&draw(&app, 19, 17))
+            .join("\n")
+            .contains("Resize terminal")
+    );
+    assert!(
+        app.advance(now + TICK_INTERVAL * 100)
+            .unwrap()
+            .ticks
+            .is_empty()
+    );
+    let resized = now + TICK_INTERVAL * 100;
+    app.set_terminal_size(23, 22, resized);
+    assert!(
+        screen(&draw(&app, 23, 22))
+            .join("\n")
+            .contains("Blast reach: 1")
+    );
+    assert!(app.advance(resized).unwrap().ticks.is_empty());
+    assert_eq!(app.advance(resized + TICK_INTERVAL).unwrap().ticks.len(), 1);
 }
 
 #[test]
 fn center_offset_tracks_movement_and_rebases_at_the_cell_boundary() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 17);
+    let mut app = support::app(start, 19, 17);
     app.handle_key(key(KeyCode::Down), start);
 
     app.advance(start + TICK_INTERVAL).unwrap();
@@ -306,7 +445,7 @@ fn center_offset_tracks_movement_and_rebases_at_the_cell_boundary() {
 #[test]
 fn center_offset_shows_gradual_assistance_without_claiming_full_centering() {
     let start = Instant::now();
-    let mut app = App::new(start, 19, 17);
+    let mut app = support::app(start, 19, 17);
     app.handle_key(key(KeyCode::Down), start);
     for tick in 1..=4 {
         app.advance(start + TICK_INTERVAL * tick).unwrap();
@@ -327,7 +466,7 @@ fn center_offset_shows_gradual_assistance_without_claiming_full_centering() {
 #[test]
 fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels() {
     let now = Instant::now();
-    let mut app = App::new(now, 100, 45);
+    let mut app = support::app(now, 100, 45);
     app.handle_key(key(KeyCode::Char('h')), now);
     let terminal = draw(&app, 100, 45);
     let text = screen(&terminal).join("\n");
@@ -341,7 +480,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         "Buroru wander at half player speed; one Blast hit kills each",
         "Sharing a centre Cell with a Buroru is lethal; overlapping bodies in adjacent Cells are safe",
         "Victory or Game Over freezes play; only restart or quit acts",
-        "R: restart during play or either outcome; Q or Escape: quit",
+        "R: restart with a freshly generated level; Q or Escape: quit",
         "(blank space) Floor",
         "Live map: 13×13 playable Cells, plus a separate exterior frame",
         "▓ Exterior boundary (not terrain)",
@@ -381,7 +520,7 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
         assert!(!reserved.contains(entry));
     }
 
-    let mut narrow = App::new(now, 19, 17);
+    let mut narrow = support::app(now, 19, 17);
     narrow.handle_key(key(KeyCode::Char('?')), now);
     for _ in 0..100 {
         narrow.handle_key(key(KeyCode::Down), now);
@@ -414,7 +553,7 @@ fn undersized_terminal_shows_resize_instructions_instead_of_the_map() {
 fn fire_up_is_hidden_then_revealed_collected_and_shows_the_longer_blast_at_supported_sizes() {
     for (width, height, left, top) in [(19, 17, 2, 0), (80, 30, 32, 6)] {
         let mut now = Instant::now();
-        let mut app = App::new(now, width, height);
+        let mut app = support::app(now, width, height);
         let initial = screen(&draw(&app, width, height));
         assert!(!initial.join("\n").contains('◈'));
         assert!(initial.join("\n").contains("Blast reach: 1"));
@@ -443,6 +582,13 @@ fn fire_up_is_hidden_then_revealed_collected_and_shows_the_longer_blast_at_suppo
             "│"
         );
         app.handle_key(key(KeyCode::Char('r')), now);
-        assert_eq!(screen(&draw(&app, width, height)), initial);
+        assert_eq!(
+            screen(&draw(&app, width, height)),
+            screen(&draw(
+                &support::generated_app(now, width, height, Default::default()),
+                width,
+                height,
+            ))
+        );
     }
 }

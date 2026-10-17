@@ -1,6 +1,6 @@
 # Game state and simulation design
 
-Agreed representation and behavioral contract for the headless core. This includes the approved generated Normal level with Buroru and Fire-up; approval does not imply those capabilities are already implemented. The [README](../../README.md) describes delivered capabilities. See the [project plan](../project-plan.md), [glossary](../../GLOSSARY.md), and [representation ADR](../adr/0002-grid-terrain-and-positioned-objects.md).
+Agreed representation and behavioral contract for the headless core. This includes the approved generated level for Normal mode with Buroru and Fire-up; approval does not imply those capabilities are already implemented. The [README](../../README.md) describes delivered capabilities. See the [project plan](../project-plan.md), [glossary](../../GLOSSARY.md), and [representation ADR](../adr/0002-grid-terrain-and-positioned-objects.md).
 
 Characters use integer sub-cell positions and movement. Rust sketches below explain data relationships rather than complete declarations. Names such as `Cell`, `Tick`, and identity types denote distinct concepts. The [movement slice spec](https://github.com/qrilka/exploderous/issues/1) defines the movement scale, defaults, limits, and validation/error contract. [Turn assistance](https://github.com/qrilka/exploderous/issues/5) deliberately revises its initial no-alignment rule and Cartesian verification matrix as specified below; remaining choices are listed under [Open design decisions](#open-design-decisions).
 
@@ -49,9 +49,9 @@ For example, `#` denotes a wall pillar and `.` denotes floor; the exterior bound
 
 Odd interior dimensions let the alternating pattern begin and end with corridors. This is a classic layout rule, not a universal terrain-storage invariant. General scenario construction also accepts valid even-sized rectangles and explicit wall rings. A frontend may draw a separate exterior boundary without adding terrain cells or shifting gameplay coordinates.
 
-### Generated Normal level
+### Generated level for Normal mode
 
-The first fuller Normal level stores a **13×13 playable Arena**, coordinates 0 through 12, with no outer wall-cell ring. The outside remains solid. The TUI draws its exterior boundary separately and distinguishes it visually from interior wall pillars.
+The generated level for Normal mode stores a **13×13 playable Arena**, coordinates 0 through 12, with no outer wall-cell ring. The outside remains solid. The TUI draws its exterior boundary separately and distinguishes it visually from interior wall pillars.
 
 Generation produces a validated Scenario with:
 
@@ -120,7 +120,7 @@ Character records own positions. There is no second authoritative character-occu
 
 Character identities remain stable through removal/reordering of other records, and are not reused during the same game. They are distinct from both positions and vector indices. Any identity allocator/exhaustion state is part of the simulation; identities must never silently wrap.
 
-Kinds are explicit compiled-in variants with kind-specific state, not arbitrary property bags, a plugin system, or a trait hierarchy. Control source is separate from kind: a bomber can be human-controlled or AI-controlled, while Normal can also have distinct enemy kinds. Overlap legality is decided by rules, not a universal one-character-per-cell storage invariant.
+Kinds are explicit compiled-in variants with kind-specific state, not arbitrary property bags, a plugin system, or a trait hierarchy. Control source is separate from kind: a bomber can be human-controlled or AI-controlled, while Normal mode can also have distinct enemy kinds. Overlap legality is decided by rules, not a universal one-character-per-cell storage invariant.
 
 ### Buroru movement and Character contact
 
@@ -159,7 +159,7 @@ struct BombEscapePermission {
 }
 ```
 
-The records above illustrate the fuller identity-based model. The generated Normal level still has only one bomb-placing Character and capacity one: multiple NPCs do not require multiple live Bombs or a generic identity allocator for Bombs. One optional Bomb retains the identities of Characters with escape permission. Removing it removes every associated permission; permissions must not transfer to a later Bomb.
+The records above illustrate the fuller identity-based model. The generated level for Normal mode still has only one bomb-placing Character and capacity one: multiple NPCs do not require multiple live Bombs or a generic identity allocator for Bombs. One optional Bomb retains the identities of Characters with escape permission. Removing it removes every associated permission; permissions must not transfer to a later Bomb.
 
 Bombs are cell-anchored. Placement selects the cell containing the character's centre and does not move or snap the character. A live bomb occupies its cell for Footprint-based movement collision. Ownership lets capacity be enforced per character; capacity counts undetonated bombs, not lingering blasts. A Bomb snapshots the placing Character's blast reach; collecting Fire-up afterward cannot alter it.
 
@@ -218,9 +218,9 @@ Fire-up increases the bomber's current blast reach by one Cell beyond the origin
 
 The Blast that reveals Fire-up cannot destroy it, including during that same effect's remaining lifetime. A distinct later Blast can destroy the exposed Item, even while the revealing effect still lingers. This protection must distinguish effects, not simply grant immunity whenever any Blast occupies the Cell. A revealed Item is not a safe Cell while the revealing Blast remains live. A covered Exit survives reveal and later Blasts.
 
-Game state stores a single optional Exit directly as `exit: Option<Cell>`. Scenarios without an Exit have no Exit objective; the generated Normal level requires one.
+Game state stores a single optional Exit directly as `exit: Option<Cell>`. Scenarios without an Exit have no Exit objective; the generated level for Normal mode requires one.
 
-Exit visibility and eligibility are different. Terrain determines whether it is covered. The Normal objective requires the living player's centre on its uncovered Cell and zero surviving enemies. Fire-up collection is not required. A locked Exit remains traversable Floor after reveal; standing there when the last enemy dies can complete the level without re-entry. Harm precedes victory. Eligibility is derived from enemy state, not a redundant mutable unlock flag; the TUI distinguishes visible locked and ready states.
+Exit visibility and eligibility are different. Terrain determines whether it is covered. The objective in Normal mode requires the living player's centre on its uncovered Cell and zero surviving enemies. Fire-up collection is not required. A locked Exit remains traversable Floor after reveal; standing there when the last enemy dies can complete the level without re-entry. Harm precedes victory. Eligibility is derived from enemy state, not a redundant mutable unlock flag; the TUI distinguishes visible locked and ready states.
 
 Example coexistence:
 
@@ -237,11 +237,11 @@ Additional power-up kinds, multiple-Item sharing policies, and simultaneous coll
 
 ## Level outcomes and restart
 
-The Normal level has one life per run. Lethal Blast or player–enemy centre contact ends the run in Defeat. A living player's centre on the uncovered Exit with no surviving enemies ends it in Victory. Harm precedes victory even if both conditions arise during the same tick.
+Normal mode has one life per run. Lethal Blast or player–enemy centre contact ends the run in Defeat. A living player's centre on the uncovered Exit with no surviving enemies ends it in Victory. Harm precedes victory even if both conditions arise during the same tick.
 
 Either outcome freezes the complete simulation, including tick progression, movement, placement, and bomb/blast deadlines. A frontend stops any catch-up batch immediately when the outcome occurs. The TUI displays defeat in a centered modal over the Arena with readable restart/quit instructions. The outcome view accepts only restart or quit, not movement, placement, or active-play help.
 
-Restart of the generated Normal level creates a newly generated Scenario under the selected rules, rather than replaying the previous one. The fresh Game begins at tick zero with its new terrain, covered Exit/Fire-up, player/enemy starting state, active lifecycle, initial blast reach, and available Bomb capacity. It removes old Bombs, Blasts, escape permissions, consumed/destroyed Items, and AI state. Frontends clear held directions, pending placement, and elapsed-time backlog; no old action or paused time leaks into the new run.
+Restart in Normal mode creates a newly generated Scenario under the selected rules, rather than replaying the previous one. The fresh Game begins at tick zero with its new terrain, covered Exit/Fire-up, player/enemy starting state, active lifecycle, initial blast reach, and available Bomb capacity. It removes old Bombs, Blasts, escape permissions, consumed/destroyed Items, and AI state. Frontends clear held directions, pending placement, and elapsed-time backlog; no old action or paused time leaks into the new run.
 
 Constructing a Game twice from one explicit Scenario still reproduces that Scenario. Deterministic scenario replay and the frontend's regenerate-on-restart action have different purposes.
 
@@ -258,7 +258,7 @@ The complete simulation state owns:
 - AI policy state, complete random-generator state, and identity allocation state where applicable.
 - The Scenario definition needed to reproduce a particular run. A session starting fresh generated runs also retains generation random state, separately from the active Game's AI state.
 
-An immutable Scenario definition and mutable current terrain have different roles; they are not competing copies of live state. Likewise, an initial random seed alone cannot replace the current generator state after random choices have occurred. Cloning an active Game reproduces its future, whereas a Normal restart advances session generation state to request a fresh Scenario.
+An immutable Scenario definition and mutable current terrain have different roles; they are not competing copies of live state. Likewise, an initial random seed alone cannot replace the current generator state after random choices have occurred. Cloning an active Game reproduces its future, whereas a restart in Normal mode advances session generation state to request a fresh Scenario.
 
 ## Simulation interface and invariants
 

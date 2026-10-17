@@ -1,7 +1,70 @@
 use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use exploderous_core::game::{
+    CellCoord, Character, CharacterId, CharacterKind, Column, ControlSource, GameRules, Position,
+    Row, Scenario, Terrain, WorldX, WorldY,
+};
 use exploderous_tui::{App, TICK_INTERVAL};
+
+// Precise interaction fixture, not the generated level for Normal mode. Public
+// construction and keyboard/time input keep these replays independent of generation.
+pub fn app(now: Instant, width: u16, height: u16) -> App {
+    app_with_rules(now, width, height, GameRules::default())
+}
+
+pub fn app_with_rules(now: Instant, width: u16, height: u16, rules: GameRules) -> App {
+    let cell = |x, y| CellCoord::new(Column::new(x), Row::new(y));
+    let blocks = [(2, 2), (4, 2), (6, 2), (2, 4), (6, 4), (4, 6)];
+    let terrain = (0..13)
+        .flat_map(|y| {
+            (0..13).map(move |x| {
+                if x % 2 == 1 && y % 2 == 1 {
+                    Terrain::Wall
+                } else if blocks.contains(&(x, y)) {
+                    Terrain::Block
+                } else {
+                    Terrain::Floor
+                }
+            })
+        })
+        .collect();
+    let scenario = Scenario::new(
+        13,
+        13,
+        terrain,
+        Character {
+            id: CharacterId::new(0),
+            position: Position::new(WorldX::new(128), WorldY::new(128)),
+            kind: CharacterKind::Bomber,
+            control: ControlSource::Human,
+        },
+        rules,
+    )
+    .unwrap()
+    .with_enemies(
+        [2, 4, 6]
+            .into_iter()
+            .enumerate()
+            .map(|(index, row)| Character {
+                id: CharacterId::new(index as u32 + 1),
+                position: Position::new(WorldX::new(8 * 256 + 128), WorldY::new(row * 256 + 128)),
+                kind: CharacterKind::Buroru,
+                control: ControlSource::Npc,
+            })
+            .collect(),
+    )
+    .unwrap()
+    .with_exit(cell(4, 2))
+    .unwrap()
+    .with_fire_up(cell(2, 2))
+    .unwrap();
+    App::from_scenario(now, width, height, scenario, 0)
+}
+
+pub fn generated_app(now: Instant, width: u16, height: u16, rules: GameRules) -> App {
+    App::new_with_seed(now, width, height, rules, 0)
+}
 
 pub fn ticks(app: &mut App, now: &mut Instant, count: u32) {
     for _ in 0..count {
@@ -62,7 +125,7 @@ pub fn prepare_ready_exit(app: &mut App, now: &mut Instant) {
     assert_eq!(app.game().outcome(), None);
 }
 
-// Actual six-Block Level, default movement and Bomb timing, no privileged state changes.
+// Authored six-Block fixture, default movement and Bomb timing, no privileged state changes.
 // Place at (4,1), escape through (4,0) to (5,0), wait for detonation on tick 201.
 pub fn reveal_exit(app: &mut App, now: &mut Instant) {
     travel(app, now, KeyCode::Right, 64);

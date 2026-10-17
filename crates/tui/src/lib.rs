@@ -1,10 +1,12 @@
-use std::time::{Duration, Instant};
+use std::{
+    collections::hash_map::RandomState,
+    hash::BuildHasher,
+    time::{Duration, Instant},
+};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ControlSource,
-    Direction, Game, GameRules, Outcome, Position, Row, Scenario, StepError, Terrain,
-    WORLD_UNITS_PER_CELL, WorldX, WorldY,
+    CharacterCommand, Direction, Game, GameRules, Outcome, Position, Scenario, StepError, Terrain,
 };
 use ratatui::{
     Frame,
@@ -20,9 +22,7 @@ pub const MIN_WIDTH: u16 = 19;
 pub const MIN_HEIGHT: u16 = ARENA_SIZE + 4; // Exterior frame and two status rows.
 const MAX_CATCH_UP_TICKS: usize = 5;
 const ARENA_SIZE: u16 = 13;
-const HELP: &str = r#"NORMAL LEVEL
-
-Controls
+const HELP: &str = r#"Controls
 Arrow keys: move; latest press wins; release falls back
 Space: place one Bomb; place another after it detonates
 While overlapping a new Bomb, you can move toward or across it
@@ -36,7 +36,7 @@ Collect Fire-up with your centre to add one Cell of reach to later Bombs
 Blast reach shows your current ability; ticking Bombs keep their old reach
 A later Blast can destroy exposed Fire-up; collecting it is not required to win
 Victory or Game Over freezes play; only restart or quit acts
-R: restart during play or either outcome; Q or Escape: quit
+R: restart with a freshly generated level; Q or Escape: quit
 ?, h, or H: open or close help
 Up/Down: scroll; Escape closes help
 Offset: signed X,Y world-unit delta from the current Cell centre; 0,0 is centred
@@ -76,6 +76,7 @@ pub struct AdvanceReport {
 
 pub struct App {
     game: Game,
+    generation_state: u64,
     held: Vec<Direction>,
     placement_pending: bool,
     focused: bool,
@@ -93,8 +94,35 @@ impl App {
     }
 
     pub fn new_with_rules(now: Instant, width: u16, height: u16, rules: GameRules) -> Self {
+        Self::new_with_seed(now, width, height, rules, RandomState::new().hash_one(0u8))
+    }
+
+    /// Reproducible generated session; restart advances its generation random state.
+    pub fn new_with_seed(
+        now: Instant,
+        width: u16,
+        height: u16,
+        rules: GameRules,
+        seed: u64,
+    ) -> Self {
+        let mut generation_state = seed;
+        let scenario = Self::generate_scenario(rules, &mut generation_state);
+        Self::from_scenario(now, width, height, scenario, generation_state)
+    }
+
+    /// Start an explicit validated Scenario for a precise replay. Restart still
+    /// requests a fresh Scenario for Normal mode using the supplied random state, never
+    /// restores this Scenario.
+    pub fn from_scenario(
+        now: Instant,
+        width: u16,
+        height: u16,
+        scenario: Scenario,
+        generation_state: u64,
+    ) -> Self {
         let mut app = Self {
-            game: new_game(rules),
+            game: Game::new(scenario, 0),
+            generation_state,
             held: Vec::new(),
             placement_pending: false,
             focused: true,
@@ -256,8 +284,16 @@ impl App {
         self.next_tick
     }
 
+    fn minimum_size(&self) -> (u16, u16) {
+        (
+            MIN_WIDTH.max(self.game.arena().width() as u16 + 2),
+            MIN_HEIGHT.max(self.game.arena().height() as u16 + 4),
+        )
+    }
+
     fn can_move(&self) -> bool {
-        self.focused && self.width >= MIN_WIDTH && self.height >= MIN_HEIGHT
+        let (width, height) = self.minimum_size();
+        self.focused && self.width >= width && self.height >= height
     }
 
     fn paused(&self) -> bool {
@@ -274,8 +310,16 @@ impl App {
         }
     }
 
+    fn generate_scenario(rules: GameRules, generation_state: &mut u64) -> Scenario {
+        Scenario::generate(rules, 40, generation_state)
+            .expect("generated Scenario placements and density are valid")
+    }
+
     fn reset(&mut self, now: Instant) {
-        self.game = new_game(*self.game.rules());
+        self.game = Game::new(
+            Self::generate_scenario(*self.game.rules(), &mut self.generation_state),
+            0,
+        );
         self.held.clear();
         self.placement_pending = false;
         self.next_tick = None;
@@ -322,72 +366,13 @@ fn direction(code: KeyCode) -> Option<Direction> {
     }
 }
 
-fn new_game(rules: GameRules) -> Game {
-    let blocks = [
-        CellCoord::new(Column::new(2), Row::new(2)),
-        CellCoord::new(Column::new(4), Row::new(2)),
-        CellCoord::new(Column::new(6), Row::new(2)),
-        CellCoord::new(Column::new(2), Row::new(4)),
-        CellCoord::new(Column::new(6), Row::new(4)),
-        CellCoord::new(Column::new(4), Row::new(6)),
-    ];
-    let terrain = (0..u32::from(ARENA_SIZE))
-        .flat_map(|row| {
-            let blocks = &blocks;
-            (0..u32::from(ARENA_SIZE)).map(move |column| {
-                let cell = CellCoord::new(Column::new(column), Row::new(row));
-                if row % 2 == 1 && column % 2 == 1 {
-                    Terrain::Wall
-                } else if blocks.contains(&cell) {
-                    Terrain::Block
-                } else {
-                    Terrain::Floor
-                }
-            })
-        })
-        .collect();
-    let scenario = Scenario::new(
-        u32::from(ARENA_SIZE),
-        u32::from(ARENA_SIZE),
-        terrain,
-        Character {
-            id: CharacterId::new(0),
-            position: Position::new(WorldX::new(128), WorldY::new(128)),
-            kind: CharacterKind::Bomber,
-            control: ControlSource::Human,
-        },
-        rules,
-    )
-    .expect("the fixed Level arena is valid")
-    .with_enemies(
-        [2, 4, 6]
-            .into_iter()
-            .enumerate()
-            .map(|(index, row)| Character {
-                id: CharacterId::new(index as u32 + 1),
-                position: Position::new(
-                    WorldX::new(8 * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2),
-                    WorldY::new(row * WORLD_UNITS_PER_CELL + WORLD_UNITS_PER_CELL / 2),
-                ),
-                kind: CharacterKind::Buroru,
-                control: ControlSource::Npc,
-            })
-            .collect(),
-    )
-    .expect("three distinctly identified Buroru start on Floor")
-    .with_exit(CellCoord::new(Column::new(4), Row::new(2)))
-    .expect("the Exit is beneath its authored Block")
-    .with_fire_up(CellCoord::new(Column::new(2), Row::new(2)))
-    .expect("the Fire-up is beneath a different authored Block");
-    Game::new(scenario, 0)
-}
-
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
-    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
+    let (width, height) = app.minimum_size();
+    if area.width < width || area.height < height {
         frame.render_widget(
             Paragraph::new(format!(
-                "Resize terminal to at least {MIN_WIDTH} columns × {MIN_HEIGHT} rows."
+                "Resize terminal to at least {width} columns × {height} rows."
             ))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true }),
@@ -487,11 +472,12 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
             Outcome::Defeat => "GAME OVER",
             Outcome::Victory => "VICTORY!",
         };
+        let modal_height = 5;
         let modal = Rect::new(
             area.x + (area.width - MIN_WIDTH) / 2,
-            top + (map_height - 5) / 2,
+            top + map_height / 2 - modal_height / 2,
             MIN_WIDTH,
-            5,
+            modal_height,
         );
         frame.render_widget(Clear, modal);
         frame.render_widget(
