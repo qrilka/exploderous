@@ -1,6 +1,6 @@
 # Exploderous
 
-An original Bomberman-inspired game in Rust, with correctness as a first-class goal.
+An original Bomberman-inspired game in Rust, with correctness as a first-class goal. It's an exercise to build an app using https://github.com/mattpocock/skills
 
 ## Development
 
