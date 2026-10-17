@@ -1,44 +1,10 @@
+mod support;
+
 use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ControlSource,
-    Game, GameRules, Outcome, Position, Row, Scenario, Terrain, WorldX, WorldY,
+    Character, CharacterCommand, CharacterId, CharacterKind, ControlSource, Game, GameRules,
+    Outcome, Position, Scenario, Terrain,
 };
-
-fn point(x: i32, y: i32) -> Position {
-    Position::new(WorldX::new(x), WorldY::new(y))
-}
-
-fn cell(column: u32, row: u32) -> CellCoord {
-    CellCoord::new(Column::new(column), Row::new(row))
-}
-
-fn bomber(position: Position) -> Character {
-    Character {
-        id: CharacterId::new(0),
-        position,
-        kind: CharacterKind::Bomber,
-        control: ControlSource::Human,
-    }
-}
-
-fn enemy(id: u32, position: Position) -> Character {
-    Character {
-        id: CharacterId::new(id),
-        position,
-        kind: CharacterKind::Buroru,
-        control: ControlSource::Npc,
-    }
-}
-
-fn action(
-    movement: Option<exploderous_core::game::Direction>,
-    place_bomb: bool,
-) -> CharacterCommand {
-    CharacterCommand {
-        character: CharacterId::new(0),
-        movement,
-        place_bomb,
-    }
-}
+use support::{action, bomber, cell, enemy, point};
 
 fn scenario(position: Position, rules: GameRules, enemies: Vec<Character>) -> Scenario {
     Scenario::new(5, 3, vec![Terrain::Floor; 15], bomber(position), rules)

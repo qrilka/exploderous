@@ -1,11 +1,9 @@
-use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ControlSource,
-    Direction, Game, GameRules, Position, Row, Scenario, Terrain, WorldX, WorldY,
-};
+mod support;
 
-fn point(x: i32, y: i32) -> Position {
-    Position::new(WorldX::new(x), WorldY::new(y))
-}
+use exploderous_core::game::{
+    CellCoord, CharacterCommand, Column, Direction, Game, GameRules, Position, Row, Terrain,
+};
+use support::{point, scenario};
 
 fn classic_arena(position: Position, rules: GameRules) -> Game {
     // Thirteen playable Cells per axis; only odd/odd Cells are pillars.
@@ -22,31 +20,7 @@ fn classic_arena(position: Position, rules: GameRules) -> Game {
                   .............\n\
                   .#.#.#.#.#.#.\n\
                   .............";
-    let terrain = layout
-        .lines()
-        .flat_map(str::chars)
-        .map(|glyph| match glyph {
-            '.' => Terrain::Floor,
-            '#' => Terrain::Wall,
-            _ => panic!("unknown terrain"),
-        })
-        .collect();
-    Game::new(
-        Scenario::new(
-            13,
-            13,
-            terrain,
-            Character {
-                id: CharacterId::new(0),
-                position,
-                kind: CharacterKind::Bomber,
-                control: ControlSource::Human,
-            },
-            rules,
-        )
-        .unwrap(),
-        0,
-    )
+    Game::new(scenario(layout, position, rules), 0)
 }
 
 fn step(game: &mut Game, movement: Option<Direction>, place_bomb: bool) {

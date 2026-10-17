@@ -1,41 +1,15 @@
-use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ControlSource,
-    Direction, Game, GameRules, Position, Row, Scenario, StepError, Terrain, WorldX, WorldY,
-};
+mod support;
 
-fn point(x: i32, y: i32) -> Position {
-    Position::new(WorldX::new(x), WorldY::new(y))
-}
-fn cell(x: u32, y: u32) -> CellCoord {
-    CellCoord::new(Column::new(x), Row::new(y))
-}
-fn character(id: u32, x: i32, y: i32) -> Character {
-    Character {
-        id: CharacterId::new(id),
-        position: point(x, y),
-        kind: if id == 0 {
-            CharacterKind::Bomber
-        } else {
-            CharacterKind::Buroru
-        },
-        control: if id == 0 {
-            ControlSource::Human
-        } else {
-            ControlSource::Npc
-        },
-    }
-}
-fn action(direction: Option<Direction>, place_bomb: bool) -> CharacterCommand {
-    CharacterCommand {
-        character: CharacterId::new(0),
-        movement: direction,
-        place_bomb,
-    }
-}
+use exploderous_core::game::{
+    Character, CharacterCommand, CharacterId, Direction, Game, GameRules, Position, Scenario,
+    StepError, Terrain,
+};
+use support::{action, bomber, cell, enemy, point};
+
 fn corridor(seed: u64, length: u32, enemies: Vec<Character>, rules: GameRules) -> Scenario {
     let mut terrain = vec![Terrain::Floor; length as usize * 3];
     terrain[length as usize..length as usize * 2].fill(Terrain::Wall);
-    Scenario::new(length, 3, terrain, character(0, 128, 640), rules)
+    Scenario::new(length, 3, terrain, bomber(point(128, 640)), rules)
         .unwrap()
         .with_enemies(enemies)
         .unwrap()
@@ -46,12 +20,32 @@ fn delta(a: Position, b: Position) -> (i32, i32) {
 }
 
 #[test]
+fn empty_input_advances_a_persistent_half_speed_centred_run() {
+    // A one-way start forces Right; the distant player is isolated below the corridor.
+    let mut game = Game::new(
+        corridor(0, 13, vec![enemy(7, point(128, 128))], GameRules::default()),
+        0,
+    );
+    for tick in 1..=32 {
+        game.step(&[]).unwrap();
+        assert_eq!(game.enemies()[0].position, point(128 + tick * 8, 128));
+        assert_eq!(game.character().position, point(128, 640));
+        assert_eq!(game.outcome(), None);
+    }
+}
+
+#[test]
 fn a_clear_corridor_keeps_its_heading_beyond_the_old_maximum_run_duration() {
     // Ten Cells of unobstructed travel exceed the old four-Cell timer ceiling.
     // The one-way start forces Right; no random layout or heading oracle is needed.
     for seed in 0..16 {
         let mut game = Game::new(
-            corridor(seed, 13, vec![character(7, 128, 128)], GameRules::default()),
+            corridor(
+                seed,
+                13,
+                vec![enemy(7, point(128, 128))],
+                GameRules::default(),
+            ),
             0,
         );
         for tick in 1..=320 {
@@ -97,11 +91,11 @@ fn junction_scenario(
         5,
         5,
         terrain,
-        character(0, 1152, 1152),
+        bomber(point(1152, 1152)),
         GameRules::default(),
     )
     .unwrap()
-    .with_enemies(vec![character(7, 640 - dx * 256, 640 - dy * 256)])
+    .with_enemies(vec![enemy(7, point(640 - dx * 256, 640 - dy * 256))])
     .unwrap()
     .with_random_seed(seed)
 }
@@ -220,7 +214,7 @@ fn initial_heading_is_chosen_from_all_legal_cardinal_directions() {
     let mut counts = [0; 4];
     for seed in 0..512 {
         let initial = junction_scenario(Direction::Right, true, 2, seed)
-            .with_enemies(vec![character(7, 640, 640)])
+            .with_enemies(vec![enemy(7, point(640, 640))])
             .unwrap();
         let mut game = Game::new(initial, 0);
         game.step(&[]).unwrap();
@@ -255,11 +249,11 @@ fn blocked_forward_and_reverse_leave_only_the_legal_side_category() {
                 5,
                 5,
                 terrain,
-                character(0, 128, 640),
+                bomber(point(128, 640)),
                 GameRules::new(2, 256).unwrap(),
             )
             .unwrap()
-            .with_enemies(vec![character(7, 384, 640)])
+            .with_enemies(vec![enemy(7, point(384, 640))])
             .unwrap()
             .with_random_seed(seed);
             let mut game = Game::new(initial, 0);
@@ -315,16 +309,20 @@ fn forced_travel_reversals_and_trapped_waiting_do_not_spend_other_enemies_random
             5,
             7,
             terrain,
-            character(0, 1152, 1664),
+            bomber(point(1152, 1664)),
             GameRules::default(),
         )
         .unwrap()
         .with_random_seed(seed);
-        let main = character(7, 384, 640);
+        let main = enemy(7, point(384, 640));
         let mut alone = Game::new(initial.clone().with_enemies(vec![main]).unwrap(), 0);
         let mut together = Game::new(
             initial
-                .with_enemies(vec![main, character(1, 128, 1664), character(2, 1152, 128)])
+                .with_enemies(vec![
+                    main,
+                    enemy(1, point(128, 1664)),
+                    enemy(2, point(1152, 128)),
+                ])
                 .unwrap(),
             0,
         );
@@ -354,12 +352,12 @@ fn obstructions_interrupt_at_centres_trapped_enemies_wait_and_bodies_do_not_bloc
         terrain[2] = obstacle;
         terrain[6] = Terrain::Floor; // Isolated trapped enemy.
         terrain[14] = Terrain::Floor; // Isolated player.
-        let initial = Scenario::new(7, 3, terrain, character(0, 128, 640), GameRules::default())
+        let initial = Scenario::new(7, 3, terrain, bomber(point(128, 640)), GameRules::default())
             .unwrap()
             .with_enemies(vec![
-                character(9, 1664, 128),
-                character(7, 128, 128),
-                character(8, 128, 128),
+                enemy(9, point(1664, 128)),
+                enemy(7, point(128, 128)),
+                enemy(8, point(128, 128)),
             ])
             .unwrap();
         let mut game = Game::new(initial, 0);
@@ -384,7 +382,7 @@ fn obstructions_interrupt_at_centres_trapped_enemies_wait_and_bodies_do_not_bloc
 
 #[test]
 fn identity_order_clone_continuation_and_rejected_frames_preserve_all_policy_state() {
-    let enemies = vec![character(99, 384, 640), character(7, 384, 640)];
+    let enemies = vec![enemy(99, point(384, 640)), enemy(7, point(384, 640))];
     let mut reordered = enemies.clone();
     reordered.reverse();
     let initial = junction_scenario(Direction::Right, true, 2, 91);
@@ -443,7 +441,10 @@ fn identity_order_clone_continuation_and_rejected_frames_preserve_all_policy_sta
         let rules = GameRules::default()
             .with_bomb_parameters(fuse, 1, 30)
             .unwrap();
-        let mut game = Game::new(corridor(91, 13, vec![character(7, 128, 128)], rules), tick);
+        let mut game = Game::new(
+            corridor(91, 13, vec![enemy(7, point(128, 128))], rules),
+            tick,
+        );
         if preplace {
             game.step(&[action(None, true)]).unwrap();
         }
@@ -478,14 +479,14 @@ fn ordinary_wandering_crosses_and_reverses_over_a_new_bomb_until_full_clearance(
                 7,
                 7,
                 terrain,
-                character(0, 384, 128),
+                bomber(point(384, 128)),
                 GameRules::new(2, 512)
                     .unwrap()
                     .with_bomb_parameters(200, 1, 2)
                     .unwrap(),
             )
             .unwrap()
-            .with_enemies(vec![character(7, 128, 128)])
+            .with_enemies(vec![enemy(7, point(128, 128))])
             .unwrap()
             .with_random_seed(seed);
             let mut game = Game::new(initial, 0);
@@ -550,14 +551,14 @@ fn a_bomb_appearing_ahead_stops_an_in_flight_route_without_off_centre_turns() {
         7,
         2,
         terrain,
-        character(0, 384, 128),
+        bomber(point(384, 128)),
         GameRules::new(2, 512)
             .unwrap()
             .with_bomb_parameters(10, 1, 2)
             .unwrap(),
     )
     .unwrap()
-    .with_enemies(vec![character(7, 128, 128)])
+    .with_enemies(vec![enemy(7, point(128, 128))])
     .unwrap();
     let mut game = Game::new(initial, 0);
     game.step(&[action(None, true)]).unwrap();
@@ -587,9 +588,9 @@ fn clones_cross_random_decisions_after_one_moving_enemy_is_removed() {
     for (x, y) in [(1, 4), (2, 4), (3, 4), (2, 3), (2, 5)] {
         terrain[y * 13 + x] = Terrain::Floor;
     }
-    let initial = Scenario::new(13, 7, terrain, character(0, 640, 128), rules)
+    let initial = Scenario::new(13, 7, terrain, bomber(point(640, 128)), rules)
         .unwrap()
-        .with_enemies(vec![character(7, 128, 128), character(99, 384, 1152)])
+        .with_enemies(vec![enemy(7, point(128, 128)), enemy(99, point(384, 1152))])
         .unwrap()
         .with_random_seed(91);
     let mut game = Game::new(initial, 0);
@@ -617,7 +618,7 @@ fn clones_cross_random_decisions_after_one_moving_enemy_is_removed() {
 
 #[test]
 fn wandering_does_not_consume_fire_up() {
-    let initial = corridor(0, 5, vec![character(7, 128, 128)], GameRules::default())
+    let initial = corridor(0, 5, vec![enemy(7, point(128, 128))], GameRules::default())
         .with_fire_up(cell(1, 0))
         .unwrap();
     let mut game = Game::new(initial, 0);

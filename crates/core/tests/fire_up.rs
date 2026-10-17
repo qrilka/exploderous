@@ -1,50 +1,10 @@
+mod support;
+
 use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ConstructionError,
-    ControlSource, Direction, Game, GameRules, Outcome, Position, Row, Scenario, StepError,
-    Terrain, WorldX, WorldY,
+    CharacterCommand, CharacterId, ConstructionError, Direction, Game, GameRules, Outcome,
+    StepError, Terrain,
 };
-
-fn cell(column: u32, row: u32) -> CellCoord {
-    CellCoord::new(Column::new(column), Row::new(row))
-}
-
-fn point(x: i32, y: i32) -> Position {
-    Position::new(WorldX::new(x), WorldY::new(y))
-}
-
-fn scenario(layout: &str, position: Position, rules: GameRules) -> Scenario {
-    let rows: Vec<_> = layout.lines().collect();
-    assert!(rows.iter().all(|row| row.len() == rows[0].len()));
-    Scenario::new(
-        rows[0].len() as u32,
-        rows.len() as u32,
-        rows.iter()
-            .flat_map(|row| row.chars())
-            .map(|glyph| match glyph {
-                '.' => Terrain::Floor,
-                '#' => Terrain::Wall,
-                '+' => Terrain::Block,
-                _ => panic!("unknown terrain"),
-            })
-            .collect(),
-        Character {
-            id: CharacterId::new(0),
-            position,
-            kind: CharacterKind::Bomber,
-            control: ControlSource::Human,
-        },
-        rules,
-    )
-    .unwrap()
-}
-
-fn action(movement: Option<Direction>, place_bomb: bool) -> CharacterCommand {
-    CharacterCommand {
-        character: CharacterId::new(0),
-        movement,
-        place_bomb,
-    }
-}
+use support::{action, cell, point, scenario};
 
 #[test]
 fn fire_up_construction_accepts_floor_or_block_and_rejects_walls_and_outside_cells() {

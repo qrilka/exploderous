@@ -1,39 +1,12 @@
+mod support;
+
 use exploderous_core::game::{
-    CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ConstructionError,
-    ControlSource, Direction, Game, GameRules, Outcome, Position, Row, Scenario, Terrain, WorldX,
-    WorldY,
+    ConstructionError, Direction, Game, GameRules, Outcome, Position, Scenario, Terrain,
 };
-
-fn cell(column: u32, row: u32) -> CellCoord {
-    CellCoord::new(Column::new(column), Row::new(row))
-}
-
-fn point(x: i32, y: i32) -> Position {
-    Position::new(WorldX::new(x), WorldY::new(y))
-}
+use support::{action, bomber, cell, point};
 
 fn scenario(terrain: Vec<Terrain>, position: Position, rules: GameRules) -> Scenario {
-    Scenario::new(
-        5,
-        3,
-        terrain,
-        Character {
-            id: CharacterId::new(0),
-            position,
-            kind: CharacterKind::Bomber,
-            control: ControlSource::Human,
-        },
-        rules,
-    )
-    .unwrap()
-}
-
-fn action(movement: Option<Direction>, place_bomb: bool) -> CharacterCommand {
-    CharacterCommand {
-        character: CharacterId::new(0),
-        movement,
-        place_bomb,
-    }
+    Scenario::new(5, 3, terrain, bomber(position), rules).unwrap()
 }
 
 #[test]
