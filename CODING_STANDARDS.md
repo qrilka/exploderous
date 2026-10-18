@@ -11,9 +11,13 @@
 
 For a new public abstraction, identify the caller requirement that cannot be served by an existing owner or a function.
 
+## Workflow review
+
+For repository automation, review how users discover and activate it, the scope and trigger of each operation, and whether validation exercises the documented usage path.
+
 ## Testing review
 
-- Review tests against the design's observable behavioral properties. Require independently justified expectations and identify a plausible incorrect implementation the tests reject; reference agreement and case counts alone do not establish conformance.
+- Review tests against the design's observable behavioral properties. Require independently justified expectations and identify a plausible incorrect implementation the tests reject; reference agreement and case counts alone do not establish conformance. Verify that a test exercises the production artifact it claims to protect. Checking a separately maintained copy of its values does not establish coverage of their production use.
 - For new or expanded parameterized tests, review the purpose of each case dimension and the measured debug runtime. Reconsider unsuitable test scope before adding production complexity solely to accelerate it.
 - When an API widens accepted inputs, check the new boundary cases through existing consumers, including consumers whose assumptions were previously guaranteed by a fixed fixture.
 
@@ -28,6 +32,8 @@ For new or substantially rewritten tests, choose placement by responsibility and
 | External public-API availability or compatibility | Integration tests under `tests/` |
 
 ## Documentation review
+
+Describe the current contract for a fresh reader. Name concrete requirements and operations; remove wording that only makes sense as a response to the preceding discussion.
 
 Before editing, choose the owning document using this table. During review, check every added or changed section against that document's responsibility. Also check unchanged capability summaries affected by the delivered behavior, including README and roadmap sections; keep ticket progress in the issue tracker. Link to the owner instead of duplicating its content.
 

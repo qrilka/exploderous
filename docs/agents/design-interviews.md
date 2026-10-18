@@ -1,6 +1,7 @@
 # Design Interviews
 
 - When requesting approval, state exactly what is being approved and the available continuation options. Treat confirmation as authorizing only the stated scope.
+- When corrective feedback leaves materially different interpretations of the intended scope, confirm that scope before editing. Distinguish a request for explanation from a requested change.
 - Before implementing a noticeable change where the request/spec leaves materially different approaches open, show the alternatives and tradeoffs and ask the user which to use. This applies to domain/interface ownership, crate/test layout, representations, dependencies, and workflows—not just style. Skip trivial implementation details and decisions already settled by the user or spec.
 - Before asking a behavioral design question, show a reachable scenario under the agreed rules where the choices produce different outcomes. If existing invariants determine the answer, explain the conclusion rather than asking the user to choose.
 - **Counterexample check:** Before settling a material design choice, challenge it with a concrete, valid scenario in which it could defeat the intended outcome. Resolve the conflict, revise the scope, or explicitly agree on the limitation before implementation.
