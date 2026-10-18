@@ -1,10 +1,8 @@
-mod support;
-
-use exploderous_core::game::{
+use super::support::{action, cell, point, scenario};
+use crate::game::{
     CharacterCommand, CharacterId, ConstructionError, Direction, Game, GameRules, Outcome,
     StepError, Terrain,
 };
-use support::{action, cell, point, scenario};
 
 #[test]
 fn fire_up_construction_accepts_floor_or_block_and_rejects_walls_and_outside_cells() {

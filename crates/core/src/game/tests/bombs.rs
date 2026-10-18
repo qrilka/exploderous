@@ -1,10 +1,8 @@
-mod support;
-
-use exploderous_core::game::{
+use super::support::{action, bomber, cell, point, scenario};
+use crate::game::{
     CharacterCommand, CharacterId, ConstructionError, Direction, Game, GameRules, Outcome,
     Position, Scenario, StepError, Terrain,
 };
-use support::{action, bomber, cell, point, scenario};
 
 fn game(layout: &str, position: Position, rules: GameRules, tick: u64) -> Game {
     Game::new(scenario(layout, position, rules), tick)

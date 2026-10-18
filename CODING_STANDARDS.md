@@ -7,10 +7,25 @@
 - Use newtypes when they enforce useful constraints or prevent mixing distinct domain concepts. Do not wrap primitives without a concrete benefit.
 - Distinguish raw input from validated domain values. Check context-dependent relationships when constructing the owning aggregate, and test rejection at the constructor that owns each invariant.
 
+## Interface review
+
+For a new public abstraction, identify the caller requirement that cannot be served by an existing owner or a function.
+
 ## Testing review
 
 - Review tests against the design's observable behavioral properties. Require independently justified expectations and identify a plausible incorrect implementation the tests reject; reference agreement and case counts alone do not establish conformance.
 - For new or expanded parameterized tests, review the purpose of each case dimension and the measured debug runtime. Reconsider unsuitable test scope before adding production complexity solely to accelerate it.
+- When an API widens accepted inputs, check the new boundary cases through existing consumers, including consumers whose assumptions were previously guaranteed by a fixed fixture.
+
+### Test placement
+
+For new or substantially rewritten tests, choose placement by responsibility and boundary. Calling public methods alone does not make a test an integration test. Existing suites need not move solely to conform to this placement policy.
+
+| Test responsibility | Default location |
+| --- | --- |
+| A crate's own domain behavior, including construction, generation, movement, Bomb/Item rules, and NPC decisions | A `#[cfg(test)]` module beside the owning implementation |
+| Behavior integrating crates or adapters, such as TUI input/time through core simulation to rendered output | Integration tests under `tests/` |
+| External public-API availability or compatibility | Integration tests under `tests/` |
 
 ## Documentation review
 

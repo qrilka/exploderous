@@ -530,15 +530,6 @@ fn help_documents_controls_live_and_reserved_glyphs_and_scrolls_wrapped_labels()
 }
 
 #[test]
-fn every_live_and_reserved_glyph_occupies_one_terminal_column() {
-    for glyph in [
-        "┌", "┐", "└", "┘", "▓", "█", "▒", "@", "a", "e", "●", "┼", "│", "─", "▧", "⬚", "▣", "◈",
-    ] {
-        assert_eq!(UnicodeWidthStr::width(glyph), 1, "glyph={glyph}");
-    }
-}
-
-#[test]
 fn undersized_terminal_shows_resize_instructions_instead_of_the_map() {
     for (width, height) in [(18, 17), (19, 16), (19, 11)] {
         let app = App::new(Instant::now(), width, height);

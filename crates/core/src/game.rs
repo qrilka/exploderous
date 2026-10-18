@@ -1360,6 +1360,15 @@ impl Game {
 
 #[cfg(test)]
 mod tests {
+    mod arena;
+    mod bombs;
+    mod buroru;
+    mod enemy_contact;
+    mod exit;
+    mod fire_up;
+    mod support;
+    mod wandering_policy;
+
     use super::{
         Arena, CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column,
         ConstructionError, ControlSource, Direction, Game, GameRules, Position, Row, Scenario,

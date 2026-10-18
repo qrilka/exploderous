@@ -1,7 +1,5 @@
-mod support;
-
-use exploderous_core::game::{Direction, Game, GameRules, Outcome, Scenario, Terrain};
-use support::{action, bomber, enemy, point};
+use super::support::{action, bomber, enemy, point};
+use crate::game::{Direction, Game, GameRules, Outcome, Scenario, Terrain};
 
 #[test]
 fn moving_contact_requires_simultaneous_cells_not_the_union_of_visited_cells() {

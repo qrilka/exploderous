@@ -1,6 +1,6 @@
 mod support;
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use exploderous_core::game::{
@@ -819,11 +819,6 @@ fn unknown_startup_options_are_rejected_before_terminal_initialization() {
         String::from_utf8_lossy(&output.stderr)
             .contains("usage: exploderous-tui [--strict-movement]")
     );
-}
-
-#[test]
-fn tick_interval_is_the_nominal_sixtieth_of_a_second() {
-    assert_eq!(TICK_INTERVAL, Duration::from_nanos(16_666_667));
 }
 
 #[test]

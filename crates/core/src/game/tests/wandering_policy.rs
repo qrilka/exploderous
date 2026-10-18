@@ -1,10 +1,8 @@
-mod support;
-
-use exploderous_core::game::{
+use super::support::{action, bomber, cell, enemy, point};
+use crate::game::{
     Character, CharacterCommand, CharacterId, Direction, Game, GameRules, Position, Scenario,
     StepError, Terrain,
 };
-use support::{action, bomber, cell, enemy, point};
 
 fn corridor(seed: u64, length: u32, enemies: Vec<Character>, rules: GameRules) -> Scenario {
     let mut terrain = vec![Terrain::Floor; length as usize * 3];

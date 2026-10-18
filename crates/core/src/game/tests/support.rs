@@ -1,7 +1,4 @@
-// Each integration-test binary uses a different subset of these helpers.
-#![allow(dead_code)]
-
-use exploderous_core::game::{
+use crate::game::{
     CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column, ControlSource,
     Direction, GameRules, Position, Row, Scenario, Terrain, WorldX, WorldY,
 };

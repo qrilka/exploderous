@@ -1,9 +1,7 @@
-mod support;
-
-use exploderous_core::game::{
+use super::support::{point, scenario};
+use crate::game::{
     CellCoord, CharacterCommand, Column, Direction, Game, GameRules, Position, Row, Terrain,
 };
-use support::{point, scenario};
 
 fn classic_arena(position: Position, rules: GameRules) -> Game {
     // Thirteen playable Cells per axis; only odd/odd Cells are pillars.

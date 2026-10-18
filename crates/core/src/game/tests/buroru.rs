@@ -1,10 +1,8 @@
-mod support;
-
-use exploderous_core::game::{
+use super::support::{action, bomber, cell, enemy, point};
+use crate::game::{
     Character, CharacterCommand, CharacterId, CharacterKind, ControlSource, Game, GameRules,
     Outcome, Position, Scenario, Terrain,
 };
-use support::{action, bomber, cell, enemy, point};
 
 fn scenario(position: Position, rules: GameRules, enemies: Vec<Character>) -> Scenario {
     Scenario::new(5, 3, vec![Terrain::Floor; 15], bomber(position), rules)
@@ -15,7 +13,7 @@ fn scenario(position: Position, rules: GameRules, enemies: Vec<Character>) -> Sc
 
 #[test]
 fn external_npc_commands_are_rejected_atomically_with_deterministic_priority() {
-    use exploderous_core::game::{Direction, StepError};
+    use crate::game::{Direction, StepError};
     let mut game = Game::new(
         scenario(
             point(128, 128),
@@ -49,7 +47,7 @@ fn external_npc_commands_are_rejected_atomically_with_deterministic_priority() {
 
 #[test]
 fn contact_uses_half_open_centre_cells_and_the_whole_travelled_path() {
-    use exploderous_core::game::Direction::{Down, Left, Right, Up};
+    use crate::game::Direction::{Down, Left, Right, Up};
     for (start, target, direction, expected, outcome) in [
         (
             point(240, 128),
@@ -129,7 +127,7 @@ fn contact_uses_half_open_centre_cells_and_the_whole_travelled_path() {
 
 #[test]
 fn turn_assistance_contact_checks_the_bend_not_the_endpoint_chord() {
-    use exploderous_core::game::Direction::Left;
+    use crate::game::Direction::Left;
     let mut terrain = vec![Terrain::Floor; 15];
     terrain[6] = Terrain::Block; // (1,1) forces an upward correction.
     let initial = Scenario::new(
@@ -151,7 +149,7 @@ fn turn_assistance_contact_checks_the_bend_not_the_endpoint_chord() {
 
 #[test]
 fn one_hit_kills_preserve_unrelated_identities_and_clone_independence() {
-    use exploderous_core::game::Direction::Left;
+    use crate::game::Direction::Left;
     let rules = GameRules::new(192, 512)
         .unwrap()
         .with_bomb_parameters(1, 1, 3)
@@ -202,7 +200,7 @@ fn one_hit_kills_preserve_unrelated_identities_and_clone_independence() {
 
 #[test]
 fn last_kill_wins_on_an_uncovered_exit_without_reentry_but_harm_takes_precedence() {
-    use exploderous_core::game::Direction::Left;
+    use crate::game::Direction::Left;
     for (distance, exit, outcome) in [
         (512, Some(cell(0, 1)), Some(Outcome::Victory)),
         (512, Some(cell(0, 0)), None), // Clearing enemies elsewhere does not win.
@@ -240,7 +238,7 @@ fn last_kill_wins_on_an_uncovered_exit_without_reentry_but_harm_takes_precedence
 
 #[test]
 fn contact_cannot_be_undone_by_killing_the_last_enemy_later_in_the_tick() {
-    use exploderous_core::game::Direction::Right;
+    use crate::game::Direction::Right;
     let rules = GameRules::new(192, 512)
         .unwrap()
         .with_bomb_parameters(1, 1, 3)
@@ -259,7 +257,7 @@ fn contact_cannot_be_undone_by_killing_the_last_enemy_later_in_the_tick() {
 
 #[test]
 fn new_blast_hits_use_moving_enemy_centres_not_overlapping_footprints() {
-    use exploderous_core::game::Direction::Right;
+    use crate::game::Direction::Right;
     for (fuse, lifetime, dies) in [(14, 1, false), (14, 2, false), (15, 1, true)] {
         let rules = GameRules::new(192, 512)
             .unwrap()
@@ -294,7 +292,7 @@ fn new_blast_hits_use_moving_enemy_centres_not_overlapping_footprints() {
 
 #[test]
 fn bomb_passage_is_per_character_and_belongs_only_to_the_current_bomb() {
-    use exploderous_core::game::Direction::Right;
+    use crate::game::Direction::Right;
     let rules = GameRules::new(2, 512)
         .unwrap()
         .with_bomb_parameters(2, 1, 1)
@@ -336,7 +334,7 @@ fn bomb_passage_is_per_character_and_belongs_only_to_the_current_bomb() {
 
 #[test]
 fn scenario_validation_owns_identity_control_and_canonical_enemy_footprints() {
-    use exploderous_core::game::ConstructionError;
+    use crate::game::ConstructionError;
     let rules = GameRules::new(2, 16).unwrap();
     let mut terrain = vec![Terrain::Floor; 15];
     terrain[1] = Terrain::Wall;
@@ -403,7 +401,7 @@ fn scenario_validation_owns_identity_control_and_canonical_enemy_footprints() {
 
 #[test]
 fn deadline_failures_preserve_enemies_items_and_per_character_permissions() {
-    use exploderous_core::game::StepError;
+    use crate::game::StepError;
     for (tick, rules, preplace) in [
         (u64::MAX, GameRules::default(), false),
         (u64::MAX - 1, GameRules::default(), false),

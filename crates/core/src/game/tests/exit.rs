@@ -1,9 +1,7 @@
-mod support;
-
-use exploderous_core::game::{
+use super::support::{action, bomber, cell, point};
+use crate::game::{
     ConstructionError, Direction, Game, GameRules, Outcome, Position, Scenario, Terrain,
 };
-use support::{action, bomber, cell, point};
 
 fn scenario(terrain: Vec<Terrain>, position: Position, rules: GameRules) -> Scenario {
     Scenario::new(5, 3, terrain, bomber(position), rules).unwrap()
