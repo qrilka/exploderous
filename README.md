@@ -4,7 +4,17 @@ An original Bomberman-inspired game in Rust, with correctness as a first-class g
 
 ## Development
 
-Install [rustup](https://rustup.rs/). Cargo commands automatically provision the Rust version, `rustfmt`, and `clippy` pinned in `rust-toolchain.toml`, both locally and in CI:
+### Development setup
+
+Requirements:
+
+- [rustup](https://rustup.rs/) to manage the Rust toolchain.
+- Python 3 for the pre-commit hook and its regression tests.
+- Repository-local hooks enabled with `git config --local core.hooksPath .githooks`.
+
+### Run and validate
+
+Cargo commands automatically provision the Rust version, `rustfmt`, and `clippy` pinned in `rust-toolchain.toml`, both locally and in CI:
 
 ```sh
 cargo run -p exploderous-tui --locked
@@ -13,7 +23,15 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo test --all-targets --locked
 ```
 
-The root is a virtual workspace. The playable level for Normal mode is `crates/tui` (package `exploderous-tui`) and requires a terminal with Kitty keyboard-protocol support, at least 19 columns × 17 rows. Arrow keys move, Space places a Bomb, R generates a fresh run, and Q/Escape quits; `h` opens paused help. Defeat the three wandering `e` Buroru with Blasts, reveal the covered Exit with a Bomb, and reach its Cell alive to win. A revealed Exit shows `▧` while enemies survive and `⬚` when ready. Reveal `◈` Fire-up under another Block, wait for the Blast to expire, then collect it to increase subsequent Bombs' reach from one Cell to two; the status row shows current blast reach. Ticking Bombs keep their original reach, and later Blasts can destroy exposed Fire-up. The upgrade is optional for victory. Entering a live Blast Cell or sharing a centre Cell with a Buroru ends the run in Game Over; either outcome freezes play until restart or quit. Each run overwrites `app.log` with terminal events, per-tick movement/placement inputs and positions, and catch-up/error records; pasted contents are redacted. The headless simulation lives in `crates/core` (package `exploderous-core`); root-level check commands cover all workspace members. CI runs formatting, Clippy (warnings fail), and tests on pushes and pull requests.
+The root is a virtual workspace. The playable level for Normal mode is `crates/tui` (package `exploderous-tui`) and requires a terminal with Kitty keyboard-protocol support, at least 19 columns × 17 rows. Arrow keys move, Space places a Bomb, R generates a fresh run, and Q/Escape quits; `h` opens paused help. Defeat the three wandering `e` Buroru with Blasts, reveal the covered Exit with a Bomb, and reach its Cell alive to win. A revealed Exit shows `▧` while enemies survive and `⬚` when ready. Reveal `◈` Fire-up under another Block, wait for the Blast to expire, then collect it to increase subsequent Bombs' reach from one Cell to two; the status row shows current blast reach. Ticking Bombs keep their original reach, and later Blasts can destroy exposed Fire-up. The upgrade is optional for victory. Entering a live Blast Cell or sharing a centre Cell with a Buroru ends the run in Game Over; either outcome freezes play until restart or quit. Each run overwrites `app.log` with terminal events, per-tick movement/placement inputs and positions, and catch-up/error records; pasted contents are redacted. The headless simulation lives in `crates/core` (package `exploderous-core`); root-level check commands cover all workspace members. CI runs hook tests, formatting, Clippy (warnings fail), and Rust tests on pushes and pull requests.
+
+### Pre-commit file-size check
+
+CI enables the repository hooks and runs `python3 scripts/test_pre_commit.py` on every push and pull request. Run the same test when changing the hook. It creates a fresh fixture clone, enables the hook, and verifies accepted and rejected commits.
+
+The hook rejects added, modified, renamed/copied, or type-changed hand-maintained files whose **staged content exceeds 5,000 tokens**, estimated as bytes / 4 (20,000 bytes). Unchanged files and unstaged edits are not checked. Oversized files must be split by responsibility; the error provides instructions for Rust modules, tests, and documentation.
+
+`Cargo.lock` is exempt through `.gitattributes`. Mark other genuinely tool-generated output there with `path/to/generated/** linguist-generated=true`; do not exempt hand-maintained code. Exemptions are read from the staged attributes, not unstaged edits.
 
 ## Project status and direction
 

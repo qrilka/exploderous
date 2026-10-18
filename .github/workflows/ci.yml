@@ -12,6 +12,10 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Enable repository hooks
+        run: git config --local core.hooksPath .githooks
+      - name: Pre-commit hook tests
+        run: python3 scripts/test_pre_commit.py
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Clippy

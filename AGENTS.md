@@ -2,6 +2,10 @@
 
 Keep project workflow improvements in this repository. Changes to shared skills, installed extensions, or user-wide settings require explicit approval of their global scope.
 
+## Development setup
+
+For a new or unconfigured checkout, follow [Development setup](README.md#development-setup). Stop if required setup fails.
+
 ## Context economy
 
 - Resolve the target, blockers, checkout state, and baseline before broad source exploration.

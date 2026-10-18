@@ -1,0 +1,2 @@
+# Tool-generated output is exempt from the staged-file token limit.
+Cargo.lock linguist-generated=true
