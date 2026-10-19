@@ -10,15 +10,14 @@ jobs:
   mutations:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      MUTATION_REPORTS: ${{ runner.temp }}/core-mutation-reports
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Install pinned cargo-mutants in runner temporary storage
+      - name: Prepare reports and install pinned cargo-mutants
         timeout-minutes: 15
         run: |
+          echo "MUTATION_REPORTS=$RUNNER_TEMP/core-mutation-reports" >> "$GITHUB_ENV"
           cargo install cargo-mutants --version 27.1.0 --locked --root "$RUNNER_TEMP/mutation-tools"
           echo "$RUNNER_TEMP/mutation-tools/bin" >> "$GITHUB_PATH"
       - name: Run shared mutation command
