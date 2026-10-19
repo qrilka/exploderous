@@ -1,0 +1,43 @@
+name: Manual core mutation tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MUTATION_REPORTS: ${{ runner.temp }}/core-mutation-reports
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned cargo-mutants in runner temporary storage
+        timeout-minutes: 15
+        run: |
+          cargo install cargo-mutants --version 27.1.0 --locked --root "$RUNNER_TEMP/mutation-tools"
+          echo "$RUNNER_TEMP/mutation-tools/bin" >> "$GITHUB_PATH"
+      - name: Run shared mutation command
+        timeout-minutes: 12
+        run: python3 scripts/run_mutation_tests.py --output "$MUTATION_REPORTS"
+      - name: Publish readable summary
+        if: always()
+        run: |
+          if test -f "$MUTATION_REPORTS/summary.md"; then
+            cat "$MUTATION_REPORTS/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Mutation summary missing; inspect setup and execution logs." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Preserve available evidence, including failed or incomplete scans
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: core-mutation-reports
+          path: ${{ env.MUTATION_REPORTS }}
+          if-no-files-found: error
+          retention-days: 7
