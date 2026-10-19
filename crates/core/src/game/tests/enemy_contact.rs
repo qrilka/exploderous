@@ -51,6 +51,39 @@ fn moving_contact_requires_simultaneous_cells_not_the_union_of_visited_cells() {
 }
 
 #[test]
+fn passing_a_buroru_between_tick_endpoints_causes_defeat() {
+    let initial = Scenario::new(
+        4,
+        1,
+        vec![
+            Terrain::Floor,
+            Terrain::Floor,
+            Terrain::Floor,
+            Terrain::Wall,
+        ],
+        bomber(point(511, 128)),
+        GameRules::default(),
+    )
+    .unwrap()
+    .with_enemies(vec![enemy(7, point(640, 128))])
+    .unwrap();
+    let mut game = Game::new(initial, 0);
+    // The Wall forces Left. Reach the Cell boundary through ordinary movement.
+    for _ in 0..16 {
+        game.step(&[]).unwrap();
+    }
+    assert_eq!(game.character().position, point(511, 128));
+    assert_eq!(game.enemies()[0].position, point(512, 128));
+    assert_eq!(game.outcome(), None);
+
+    game.step(&[action(Some(Direction::Right), false)]).unwrap();
+    // Their endpoint Cells differ, but both centres occupy Cell 1 for 0 < t < 1/16.
+    assert_eq!(game.character().position, point(527, 128));
+    assert_eq!(game.enemies()[0].position, point(504, 128));
+    assert_eq!(game.outcome(), Some(Outcome::Defeat));
+}
+
+#[test]
 fn assisted_forward_contact_uses_the_time_spent_on_correction_first() {
     for (prefix, outcome) in [(15, None), (16, Some(Outcome::Defeat))] {
         let mut terrain = vec![Terrain::Floor; 8 * 4];
