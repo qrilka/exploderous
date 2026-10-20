@@ -31,6 +31,23 @@ fn step(game: &mut Game, movement: Option<Direction>, place_bomb: bool) {
 }
 
 #[test]
+fn a_two_unit_footprint_stops_at_exact_wall_contact_when_moving_up() {
+    for assisted in [false, true] {
+        let rules = GameRules::new(2, 128)
+            .unwrap()
+            .with_turn_assistance(assisted);
+        let mut game = Game::new(scenario("#\n.\n.", point(128, 384), rules), 0);
+        step(&mut game, Some(Direction::Up), false);
+        // The Wall ends at y=256; the Footprint extends one unit above its centre.
+        assert_eq!(
+            game.character().position,
+            point(128, 257),
+            "assisted={assisted}"
+        );
+    }
+}
+
+#[test]
 fn a_thirteen_cell_interior_keeps_complete_footprints_and_blasts_inside_every_corner() {
     use Direction::{Down, Left, Right, Up};
 
