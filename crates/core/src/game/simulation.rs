@@ -367,13 +367,12 @@ impl Game {
         direction: Direction,
         distance: u32,
     ) -> Position {
-        // Re-evaluate at each segment's start, including speculative assistance.
-        // A cardinal segment cannot re-enter after clearing; the next segment
-        // treats the Bomb as solid even before the tick commits its permission.
-        let escaping_bomb = self.bomb.as_ref().filter(|bomb| {
-            bomb.escape_allowed_for(id)
-                && Rect::footprint(start, rules).overlaps(self.arena.cell_bounds(bomb.cell))
-        });
+        // A straight segment cannot re-enter after clearance. If a perpendicular
+        // correction clears the Bomb, the forward leg stays clear even with permission.
+        let escaping_bomb = self
+            .bomb
+            .as_ref()
+            .filter(|bomb| bomb.escape_allowed_for(id));
         let half = i64::from(rules.footprint_side / 2);
         let distance = i64::from(distance);
         let cell = i64::from(WORLD_UNITS_PER_CELL);
