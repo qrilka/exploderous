@@ -158,8 +158,10 @@ fn a_tick_130_blast_is_dangerous_on_159_but_not_during_movement_on_160() {
     );
     game.step(&[action(None, true)]).unwrap(); // placed at 10, detonates at 130
     game.step(&[action(Some(Direction::Up), false)]).unwrap();
-    while game.tick() < 158 {
+    // Stage both runs before the last dangerous tick to compare crossings before/after expiry.
+    for tick in 12..=158 {
         game.step(&[]).unwrap();
+        assert_eq!(game.tick(), tick);
     }
     assert_eq!(game.outcome(), None);
     assert_eq!(game.blasts()[0].expires_at(), 160);
