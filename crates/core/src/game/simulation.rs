@@ -83,27 +83,11 @@ impl Game {
             .contacts(
                 &Motion {
                     points: [before.position, before.position, after.position],
-                    speed: BURORU_SPEED,
+                    speed: BURORU_MOVEMENT_DISTANCE,
                 },
                 &self.arena,
             )
         });
-        let enemy_path_hits: BTreeSet<_> = self
-            .enemies
-            .iter()
-            .zip(&enemies)
-            .filter(|(before, after)| {
-                self.blasts.iter().any(|blast| {
-                    blast.expires_at > next_tick
-                        && blast.cells.iter().any(|&cell| {
-                            self.arena
-                                .cell_bounds(cell)
-                                .intersects_centre_segment(before.position, after.position)
-                        })
-                })
-            })
-            .map(|(before, _)| before.id)
-            .collect();
         let final_cell = self
             .arena
             .cell_containing(position)
@@ -205,8 +189,9 @@ impl Game {
                 .arena
                 .cell_containing(enemy.position)
                 .expect("enemy stays in Arena");
-            !enemy_path_hits.contains(&enemy.id)
-                && !self.blasts.iter().any(|blast| blast.cells.contains(&cell))
+            // A survivor starts clear of live Blasts. Its straight, sub-Cell step
+            // cannot cross a dangerous Cell with both endpoints safe.
+            !self.blasts.iter().any(|blast| blast.cells.contains(&cell))
         });
         self.wandering
             .retain(|id, _| self.enemies.iter().any(|enemy| enemy.id == *id));
@@ -296,7 +281,9 @@ impl Game {
                 }
             });
         }
-        heading.map_or(start, |direction| sweep(direction, BURORU_SPEED))
+        heading.map_or(start, |direction| {
+            sweep(direction, BURORU_MOVEMENT_DISTANCE)
+        })
     }
 
     fn blast_coverage(&self, origin: CellCoord, reach: u64) -> Vec<CellCoord> {

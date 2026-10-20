@@ -6,11 +6,13 @@ mod rules;
 mod scenario;
 mod simulation;
 
-const BURORU_SPEED: u32 = 8;
+const BURORU_MOVEMENT_DISTANCE: u32 = 8;
 const GENERATED_ARENA_SIZE: u32 = 13;
 
 /// Simulation units, not pixels. Cell intervals are lower-inclusive, upper-exclusive.
 pub const WORLD_UNITS_PER_CELL: i32 = 256;
+// Buroru endpoint-only Blast damage relies on movement shorter than one Cell.
+const _: () = assert!(BURORU_MOVEMENT_DISTANCE < WORLD_UNITS_PER_CELL as u32);
 const MAX_TURN_CORRECTION: u32 = (WORLD_UNITS_PER_CELL / 2) as u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
