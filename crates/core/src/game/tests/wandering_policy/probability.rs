@@ -105,24 +105,63 @@ fn blocked_routes_prefer_reversal_and_split_the_remaining_choices_among_sides() 
 
 #[test]
 fn initial_heading_is_chosen_from_all_legal_cardinal_directions() {
-    let mut counts = [0; 4];
-    for seed in 0..512 {
-        let initial = junction_scenario(Direction::Right, true, 2, seed)
-            .with_enemies(vec![enemy(7, point(640, 640))])
-            .unwrap();
-        let mut game = Game::new(initial, 0);
-        game.step(&[]).unwrap();
-        let index = match delta(point(640, 640), game.enemies()[0].position) {
-            (0, -8) => 0,
-            (8, 0) => 1,
-            (0, 8) => 2,
-            (-8, 0) => 3,
-            movement => panic!("seed={seed}, unexpected initial movement={movement:?}"),
-        };
-        counts[index] += 1;
+    // One decision per fixed seed. Bands are roughly four binomial standard
+    // deviations around 512 / legal_count, not proof of exact probabilities.
+    for (legal_count, minimum, maximum) in [(2, 212, 300), (3, 129, 213), (4, 90, 166)] {
+        let mut counts = [0; 4];
+        for seed in 0..512 {
+            // Right/Left are always open; Down then Up add the remaining exits.
+            let initial = junction_scenario(Direction::Right, true, legal_count - 2, seed)
+                .with_enemies(vec![enemy(7, point(640, 640))])
+                .unwrap();
+            let mut game = Game::new(initial, 0);
+            game.step(&[]).unwrap();
+            let index = match delta(point(640, 640), game.enemies()[0].position) {
+                (8, 0) => 0,
+                (-8, 0) => 1,
+                (0, 8) if legal_count >= 3 => 2,
+                (0, -8) if legal_count == 4 => 3,
+                movement => panic!(
+                    "seed={seed}, exits={legal_count}, unexpected initial movement={movement:?}"
+                ),
+            };
+            counts[index] += 1;
+        }
+        eprintln!(
+            "initial headings: exits={legal_count}, counts={:?}",
+            &counts[..legal_count]
+        );
+        for &count in &counts[..legal_count] {
+            assert!(
+                (minimum..=maximum).contains(&count),
+                "exits={legal_count}, counts={counts:?}"
+            );
+        }
     }
-    // One initial decision per seed; broad bands reject a fixed or biased heading.
-    for count in counts {
-        assert!((90..=166).contains(&count), "counts={counts:?}");
+}
+
+#[test]
+fn open_junction_side_turns_are_balanced_conditionally_on_turning() {
+    let mut sides = [0; 2];
+    // About 410 turns across 4,096 fixed seeds give a roughly four-standard-
+    // deviation 40–60% band for each side. Existing tests check the 90/10 split.
+    for seed in 0..4096 {
+        let mut game = junction(Direction::Right, true, 2, seed);
+        game.step(&[]).unwrap();
+        match delta(point(640, 640), game.enemies()[0].position) {
+            (8, 0) => {}
+            (0, -8) => sides[0] += 1,
+            (0, 8) => sides[1] += 1,
+            movement => panic!("seed={seed}, illegal junction movement={movement:?}"),
+        }
+    }
+    let turns: u32 = sides.iter().sum();
+    eprintln!("open-junction side turns: sides={sides:?}, total={turns}");
+    assert!(turns >= 300, "too few turns to check balance: {sides:?}");
+    for count in sides {
+        assert!(
+            100 * count >= 40 * turns && 100 * count <= 60 * turns,
+            "side counts={sides:?}, total turns={turns}"
+        );
     }
 }
