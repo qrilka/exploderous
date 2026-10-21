@@ -16,6 +16,8 @@ import sys
 import tempfile
 import time
 
+from mutation_exclusions import EXCLUSION_REASON, FILES, ast_rules, select_exclusions
+
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "27.1.0"
@@ -26,22 +28,6 @@ CARGO_ARGS = [
 ]
 OUTCOMES = {"CaughtMutant": "caught", "MissedMutant": "surviving",
             "Unviable": "unviable", "Timeout": "timed_out"}
-# Structural expressions, original operators and approved replacements, never coordinates.
-RNG_RULES = {
-    "threshold": ("count.wrapping_neg() % count", "%", ("/",)),
-    "shift30": ("value >> 30", ">>", ("<<",)),
-    "xor27": ("value ^ (value >> 27)", "^", ("|", "&")),
-    "shift27": ("value >> 27", ">>", ("<<",)),
-    "shift31": ("value >> 31", ">>", ("<<",)),
-    "acceptance": ("value >= threshold", ">=", ("<",)),
-}
-RNG_EXCLUSION_REASON = (
-    "Policy exclusion approved in #38: six known RNG-quality mutations and one "
-    "mutant nontermination case are outside this assessment's scope. "
-    "Excluded is not caught or proven equivalent; other RNG mutations remain eligible."
-)
-
-
 def save(path, value):
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(value, indent=2) + "\n")
@@ -110,30 +96,6 @@ def stop_session(child):
             signal.signal(signum, handler)
 
 
-def select_exclusions(output):
-    inventory = json.loads((output / "inventory.json").read_text())
-    matches = json.loads((output / "ast-matches.json").read_text())
-    excluded = []
-    for rule, (_, operator, replacements) in RNG_RULES.items():
-        nodes = [m for m in matches if m["ruleId"] == rule]
-        if len(nodes) != 1:
-            raise ValueError(f"RNG exclusion source drift: expected one AST match for {rule}, got {len(nodes)}")
-        node = nodes[0]
-        # Both tools use character columns; ast-grep is zero-based, cargo-mutants one-based.
-        start, end = [tuple(node["range"][key][axis] + 1 for axis in ("line", "column"))
-                      for key in ("start", "end")]
-        for replacement in replacements:
-            candidates = [m for m in inventory if m.get("genre") == "BinaryOperator"
-                          and m["file"] == node["file"]
-                          and m["name"].endswith(f": replace {operator} with {replacement} in random_choice")
-                          and start <= (m["span"]["start"]["line"], m["span"]["start"]["column"])
-                          < (m["span"]["end"]["line"], m["span"]["end"]["column"]) <= end]
-            if len(candidates) != 1:
-                raise ValueError(f"RNG exclusion source drift: expected one mutation for {rule} -> {replacement}, got {len(candidates)}")
-            excluded.append(candidates[0])
-    return excluded
-
-
 def summarize(output):
     inventory = json.loads((output / "inventory.json").read_text())
     generated = {m["name"] for m in inventory}
@@ -141,8 +103,9 @@ def summarize(output):
         raise ValueError("inventory must contain unique mutations")
     exclusions = json.loads((output / "excluded.json").read_text())
     excluded = {m["name"] for m in exclusions["mutations"]}
-    if (len(excluded) != 7 or len(excluded) != len(exclusions["mutations"])
-            or excluded != {m["name"] for m in select_exclusions(output)} or not excluded <= generated):
+    if (len(excluded) != len(exclusions["mutations"])
+            or exclusions != {"reason": EXCLUSION_REASON, "mutations": select_exclusions(output)}
+            or not excluded <= generated):
         raise ValueError("excluded inventory does not match the approved policy")
     names = generated - excluded
     if not names:
@@ -206,7 +169,11 @@ def report(output, summary):
                   f"| Timed out | {counts['timed_out']} | Evaluation exceeded its limit; not counted as caught. |"]
     if exclusions := summary.get("exclusions"):
         lines += ["", "## Excluded by policy", "", exclusions["reason"], ""]
-        lines += [f"- `{m['name']}`" for m in exclusions["mutations"]]
+        for kind, title in [("rng-policy", "RNG scope policy"), ("equivalent", "Valid-state equivalence")]:
+            selected = [m for m in exclusions["mutations"] if m["kind"] == kind]
+            lines += [f"### {title} ({len(selected)})", ""]
+            lines += [f"- `{m['name']}` — {m['reason']}" for m in selected]
+            lines += [""]
     lines += ["", *summary.get("evidence_errors", []),
               "Untested means never started; interrupted means started without a terminal outcome.",
               "Generated = excluded + eligible. Eligible = completed + untested + interrupted.",
@@ -299,18 +266,12 @@ def main():
         code = run(CARGO_ARGS + ["--list", "--json", "--diff"], "inventory.json", separate_errors=True)
         if code:
             raise RuntimeError(f"mutation inventory exited {code}; see inventory.json.stderr")
-        rules = "\n---\n".join(json.dumps({
-            "id": rule, "language": "Rust", "severity": "info",
-            "rule": {"pattern": pattern, "inside": {
-                "kind": "function_item", "has": {"field": "name", "regex": "^random_choice$"},
-                "stopBy": {"kind": "function_item"}}},
-        }) for rule, (pattern, _, _) in RNG_RULES.items())
-        code = run(["ast-grep", "scan", "--inline-rules", rules, "--json=compact",
-                    "crates/core/src/game.rs"], "ast-matches.json", separate_errors=True)
+        code = run(["ast-grep", "scan", "--inline-rules", ast_rules(), "--json=compact",
+                    *sorted(set(FILES.values()))], "ast-matches.json", separate_errors=True)
         if code:
             raise RuntimeError(f"ast-grep exited {code}; see ast-matches.json.stderr")
         excluded = select_exclusions(output)
-        save(output / "excluded.json", {"reason": RNG_EXCLUSION_REASON, "mutations": excluded})
+        save(output / "excluded.json", {"reason": EXCLUSION_REASON, "mutations": excluded})
         # Reject an empty/malformed eligible inventory before starting a scan.
         summarize(output)
         filters = [arg for m in excluded for arg in ("--exclude-re", f"^{re.escape(m['name'])}$")]

@@ -11,8 +11,9 @@ import sys
 import time
 
 
-def mutation(marker, operator, replacement, function="random_choice", file="crates/core/src/game.rs"):
-    source = Path("crates/core/src/game.rs").read_text()
+def mutation(marker, operator, replacement, function="random_choice", file="crates/core/src/game.rs",
+             source_file="crates/core/src/game.rs"):
+    source = Path(source_file).read_text()
     tag = f"/* {marker} */"
     offset = source.index(operator, source.index(tag) + len(tag))
     prefix = source[:offset]
@@ -55,8 +56,22 @@ def main():
         mutation("shift27", ">>", "<<"), mutation("shift31", ">>", "<<"),
         mutation("acceptance", ">=", "<"),
     ]
-    inventory += rng
-    if mode == "rng_exclusions":
+    equivalent = [
+        mutation("boundary-first", "+", "-", "Motion::boundary_times"),
+        mutation("boundary-first", "+", "*", "Motion::boundary_times"),
+        mutation("boundary-remainder", "%", "/", "Motion::boundary_times"),
+        mutation("boundary-remainder", "%", "+", "Motion::boundary_times"),
+        mutation("boundary-edge", "==", "!=", "Motion::boundary_times"),
+        mutation("dedup-left", "*", "+", "Motion::contacts"),
+        mutation("dedup-left", "*", "/", "Motion::contacts"),
+        mutation("dedup-right", "*", "/", "Motion::contacts"),
+    ]
+    blast_file = "crates/core/src/game/simulation.rs"
+    equivalent += [mutation("ray-limit", "-", replacement, "Game::blast_coverage",
+                            blast_file, blast_file) for replacement in ("+", "/")]
+    policy = rng + equivalent
+    inventory += policy
+    if mode == "policy_exclusions":
         inventory += [
             mutation("return-mod", "%", "/"), mutation("threshold", "%", "*"),
             mutation("other-fn", "%", "/", "other_random_choice"),
@@ -65,8 +80,24 @@ def main():
             mutation("xor30", "^", "|"),
         ]
         inventory[-2]["fixture_id"] = "other-file:/"
+        inventory += [
+            mutation("sort-left", "*", "+", "Motion::contacts"),
+            mutation("sort-right", "*", "/", "Motion::contacts"),
+            mutation("midpoint-left", "*", "+", "Motion::contacts"),
+            mutation("midpoint-right", "*", "/", "Motion::contacts"),
+            mutation("dedup-right", "*", "+", "Motion::contacts"),
+            mutation("boundary-remainder", "%", "*", "Motion::boundary_times"),
+            mutation("other-boundary", "+", "*", "Motion::boundary_times_extra"),
+            mutation("other-dedup", "*", "/", "Motion::contacts_extra"),
+            mutation("other-limit", "-", "+", "Game::blast_coverage", blast_file, blast_file),
+            mutation("other-ray", "-", "+", "Game::blast_coverage_extra", blast_file, blast_file),
+            mutation("dedup-left", "*", "/", "Motion::contacts", file=blast_file),
+        ]
+        inventory[-1]["fixture_id"] = "other-contact-file:/"
+    if mode == "missing_equivalent":
+        inventory = [m for m in inventory if m.get("fixture_id") != "ray-limit:/"]
     if mode == "empty":
-        inventory = rng
+        inventory = policy
     patterns = [args[i + 1] for i, arg in enumerate(args) if arg == "--exclude-re"]
     if "--list" not in args and mode != "ignored_exclusions":
         inventory = [m for m in inventory if not any(re.search(p, m["name"]) for p in patterns)]

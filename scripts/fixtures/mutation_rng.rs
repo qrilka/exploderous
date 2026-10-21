@@ -27,3 +27,28 @@ fn other_random_choice(count: u64) -> u64 {
 fn random_choice_extra(count: u64) -> u64 {
     count.wrapping_neg() /* similar-fn */ % count
 }
+
+impl Motion {
+    fn boundary_times(&self) {
+        let first = start.min(end).div_euclid(WORLD_UNITS_PER_CELL)
+            /* boundary-first */ + 1;
+        if start /* boundary-remainder */ % WORLD_UNITS_PER_CELL /* boundary-edge */ == 0 {
+            times.push((travelled, i64::from(self.speed)));
+        }
+    }
+
+    fn contacts(&self) {
+        times.sort_by(|&(a, b), &(c, d)| (a /* sort-left */ * d).cmp(&(c /* sort-right */ * b)));
+        times.dedup_by(|&mut (a, b), &mut (c, d)|
+            a /* dedup-left */ * d == c /* dedup-right */ * b);
+        let midpoint = a /* midpoint-left */ * d + c /* midpoint-right */ * b;
+    }
+
+    fn boundary_times_extra(&self) {
+        let first = start.min(end).div_euclid(WORLD_UNITS_PER_CELL) /* other-boundary */ + 1;
+    }
+
+    fn contacts_extra(&self) {
+        times.dedup_by(|&mut (a, b), &mut (c, d)| a /* other-dedup */ * d == c * b);
+    }
+}

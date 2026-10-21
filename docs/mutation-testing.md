@@ -39,7 +39,11 @@ Budget expiry, Ctrl-C, or SIGTERM stops dispatch and kills launched build/test p
 
 ## Scope exclusions
 
-The shared local/manual-CI runner excludes exactly seven reviewed mutations in `random_choice`, as specified in [#38](https://github.com/qrilka/exploderous/issues/38):
+The shared local/manual-CI runner excludes exactly **17 reviewed mutations**: seven RNG scope-policy exclusions and ten valid-state equivalents. They remain separate from evaluated outcomes; an exclusion is never a catch.
+
+### RNG scope policy — seven mutations
+
+The seven mutations in `random_choice` are specified in [#38](https://github.com/qrilka/exploderous/issues/38):
 
 | Change | Count |
 | --- | ---: |
@@ -50,13 +54,31 @@ The shared local/manual-CI runner excludes exactly seven reviewed mutations in `
 
 This is a policy decision not to pursue these generator-quality and mutant-termination findings, **not evidence that they are caught, equivalent, or harmless**. Existing fixed-seed gameplay-policy tests and every other RNG mutation remain in scope, including the return-value `%` → `/` mutation. The production generator is unchanged; no tighter probability bands or exact-sequence tests are required merely to reject these mutations.
 
-`RNG_RULES` in `scripts/run_mutation_tests.py` pairs structural Rust expressions with the original operators and approved replacements. The runner uses ast-grep inside the nearest function named `random_choice` in `crates/core/src/game.rs`. It joins current AST ranges with the generated mutation inventory, resolving each approved replacement to exactly one mutation, then writes its current identity and rationale to `excluded.json`. Fully anchored, escaped filters pass those resolved names to cargo-mutants; there are no stored source coordinates. Scan inventory and outcomes must reconcile with the remaining eligible set; excluded results cannot silently become catches. Local and manual CI use this same path despite `--no-config`.
+### Valid-state equivalence — ten mutations
 
-Line movement, whitespace, comments and formatting do not require policy edits. If a target expression is missing or ambiguous, or its approved mutation cannot be uniquely resolved, setup fails **before baseline or mutation evaluation**. Review the policy when the target expressions, owning function/file, generator/choice behavior or quality requirements change; do not widen filters to a whole function to avoid that review. Recorded AST matches and generated inventory remain available after setup failure, but are not evidence of a completed assessment. Filtering never rewrites results from earlier scans.
+These exclusions were individually reviewed under [#36](https://github.com/qrilka/exploderous/issues/36#issuecomment-6318365597) and [#37](https://github.com/qrilka/exploderous/issues/37#issuecomment-6325963319), then approved for exclusion under [#33](https://github.com/qrilka/exploderous/issues/33#issuecomment-6326522128). Each argument concerns one mutation at a time, not combinations of mutations.
+
+| Owner and expression | Exact changes | Count | Equivalence argument |
+| --- | --- | ---: | --- |
+| `Motion::boundary_times`: first boundary index `... + 1` | `+` → `-`, `*` (M249/M250) | 2 | Retains all required boundary events; added samples inspect actual paths or already-checked endpoints. |
+| Same function: `start % WORLD_UNITS_PER_CELL == 0` | `%` → `/`, `+`; `==` → `!=` (M252/M253/M251) | 3 | Changes redundant segment-start samples. Negative edge starts are already in the ordinary boundary loop; incoming bend endpoints and tick start remain checked. |
+| `Motion::contacts`, only inside `times.dedup_by`: `a * d == c * b` | Left `*` → `/`; right `*` → `/` (M270/M272) | 2 | May retain duplicate times, but cannot delete distinct required events under the current sorted, nonnegative tick-time constraints and callback argument order. |
+| Same deduplication callback: left `a * d` | `*` → `+` (M269) | 1 | Equivalent only for reachable current movement states: Buroru boundary events occur at tick endpoints and interior player events share a speed denominator. Not a general rational-equality replacement. |
+| `Game::blast_coverage`: `axis_length - 1` | `-` → `+`, `/` | 2 | Only loosens the iteration allowance; the unchanged neighbor check still stops at the true edge. Both variants retain a finite Arena-derived work bound, and `+ 1` fits validated dimensions. |
+
+Reconsider boundary exclusions if actual paths, bend/endpoint handling or Cell-boundary semantics change. Reconsider deduplication exclusions if time ranges, ordering or callback argument semantics change. **M269 additionally requires centred Buroru starts, canonical Footprints, eight-unit enemy movement and the current player-event denominators**; review it when any of those assumptions change. Reconsider ray exclusions if dimension limits or ray/neighbor semantics change. Surviving tests alone do not establish these equivalence arguments.
+
+### Structural resolution and reporting
+
+`RULES` in `scripts/mutation_exclusions.py` pairs structural Rust expressions and owning functions/files with the original operators, exact approved replacements and rationale. The runner uses ast-grep inside the nearest named function; contact products must also be inside `times.dedup_by`, leaving sort and midpoint arithmetic eligible. Targets live in `crates/core/src/game.rs` and `crates/core/src/game/simulation.rs`. It joins current AST ranges with the generated mutation inventory, resolving each approved replacement to exactly one mutation, then writes its current identity, `kind` (`rng-policy` or `equivalent`) and individual `reason` to `excluded.json`. The readable summary lists the seven RNG policy exclusions separately from the ten equivalents, including their reasons.
+
+Fully anchored, escaped filters pass those resolved names to cargo-mutants; there are no stored source coordinates. Scan inventory, exclusion metadata and outcomes must reconcile with the approved policy and remaining eligible set; excluded results cannot silently become catches. Local and manual CI use this same path despite `--no-config`. Nearby replacements, other functions/files, sorting, midpoint sampling and unapproved RNG changes stay eligible.
+
+Line movement, whitespace, comments and formatting do not require policy edits. If a target expression is missing or ambiguous, or its approved mutation cannot be uniquely resolved, setup fails **before baseline or mutation evaluation**. Review the policy when the target expressions, owning function/file or rationale assumptions change; do not widen filters to a whole function to avoid that review. Recorded AST matches and generated inventory remain available after setup failure, but are not evidence of a completed assessment. Filtering never rewrites results from earlier scans.
 
 ## Reading results
 
-Open `summary.md` first. It contains the baseline result, completion status, elapsed time, exit status, reconciled generated/excluded/eligible execution counts, a separate policy-exclusion list and reason, and these evaluation outcomes:
+Open `summary.md` first. It contains the baseline result, completion status, elapsed time, exit status, reconciled generated/excluded/eligible execution counts, separate RNG-policy and valid-state-equivalence exclusion lists with individual reasons, and these evaluation outcomes:
 
 | Outcome | Meaning | Interpretation |
 | --- | --- | --- |
@@ -76,7 +98,7 @@ The output directory includes:
 - `checkout.txt` and `source.patch`: checkout state and tracked differences from `HEAD`. A dirty checkout is allowed and explicitly recorded; untracked source contents are not captured by the patch, so preserve them separately if needed for reproduction.
 - `inventory.json`: the complete generated inventory before repository policy exclusions, including names, source spans, and diffs.
 - `ast-matches.json`: ast-grep's structural matches, source ranges and rule identities; `metadata.json` records the actual inline rules and tool version.
-- `excluded.json`: the seven resolved current mutation records and policy reason, separate from evaluation outcomes.
+- `excluded.json`: the 17 resolved current mutation records with their rationale category and individual reason, separate from evaluation outcomes.
 - `console.log` and setup-command output/stderr files.
 - `mutants.out/`: the tool's shuffled eligible inventory, baseline and mutation logs, diffs, and incremental outcomes/category lists.
 
@@ -98,4 +120,4 @@ The run summary displays `summary.md`; download **core-mutation-reports** from t
 python3 scripts/test_mutation_runner.py
 ```
 
-This requires ast-grep 0.51.0 and exercises the public CLI in a temporary clone with real structural parsing, a small Rust source fixture, controlled external Cargo/report fixtures and real process cleanup. It does not execute mutation tests or change gameplay tests. Ordinary CI installs the pinned parser and runs these checks, not a mutation scan. They cover all seven exclusion identities, nearby eligible operators/functions/files, moved and compactly reformatted source, non-ASCII character columns, missing/ambiguous targets, parser version/failure and ignored-filter cases, outcome/status propagation, baseline failure/timeout, partial counts, malformed/missing evidence, unsafe arguments/output locations, elapsed deadlines, and cancellation with children in separate process groups. They do not validate cargo-mutants itself or GitHub artifact transport; those require a real local scan and a manual CI run, respectively.
+This requires ast-grep 0.51.0 and exercises the public CLI in a temporary clone with real structural parsing, a small Rust source fixture, controlled external Cargo/report fixtures and real process cleanup. It does not execute mutation tests or change gameplay tests. Ordinary CI installs the pinned parser and runs these checks, not a mutation scan. They cover all 17 exclusion identities and rationale categories; nearby eligible operators, sorting/midpoint expressions, functions and files; moved, compactly reformatted and commented source; non-ASCII character columns; missing/ambiguous RNG, contact and Blast targets; missing inventory targets; parser version/failure and ignored-filter cases; outcome/status propagation, baseline failure/timeout, partial counts, malformed/missing evidence, unsafe arguments/output locations, elapsed deadlines, and cancellation with children in separate process groups. They do not validate cargo-mutants itself or GitHub artifact transport; those require a real local scan and a manual CI run, respectively.
