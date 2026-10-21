@@ -4,7 +4,7 @@ Mutation testing changes one expression or function in a temporary source copy, 
 
 ## Local command
 
-Follow the [development setup](../README.md#development-setup). The runner additionally requires Linux with `/proc`, Python 3.11+, Git, and **cargo-mutants 27.1.0** on `PATH`. It checks that version and never installs or updates local tools. If installation is needed, explicitly install the pinned version into a directory you control; there is no automatic user-wide setup.
+Follow the [development setup](../README.md#development-setup). The runner additionally requires Linux with `/proc`, Python 3.11+, Git, **cargo-mutants 27.1.0** and **ast-grep 0.51.0** on `PATH`. It checks both versions and never installs or updates local tools. If installation is needed, explicitly install the pinned versions into a directory you control; there is no automatic user-wide setup.
 
 From any directory, invoke the script by its path:
 
@@ -45,14 +45,14 @@ The shared local/manual-CI runner excludes exactly seven reviewed mutations in `
 | --- | ---: |
 | Rejection threshold `%` → `/` | 1 |
 | Mixer shifts `>>` → `<<` | 3 |
-| Mixer XOR → OR/AND | 2 |
+| Second mixer XOR (`value ^ (value >> 27)`) → OR/AND | 2 |
 | Acceptance `>=` → `<` (known mutant nontermination) | 1 |
 
 This is a policy decision not to pursue these generator-quality and mutant-termination findings, **not evidence that they are caught, equivalent, or harmless**. Existing fixed-seed gameplay-policy tests and every other RNG mutation remain in scope, including the return-value `%` → `/` mutation. The production generator is unchanged; no tighter probability bands or exact-sequence tests are required merely to reject these mutations.
 
-`RNG_EXCLUSIONS` in `scripts/run_mutation_tests.py` lists the seven exact names, including source locations. The runner first records the unfiltered generated inventory, writes the matching records and rationale to `excluded.json`, and passes fully anchored, escaped name filters to cargo-mutants. Scan inventory and outcomes must reconcile with the remaining eligible set; excluded results cannot silently become catches. Local and manual CI use this same path despite `--no-config`.
+`RNG_RULES` in `scripts/run_mutation_tests.py` pairs structural Rust expressions with the original operators and approved replacements. The runner uses ast-grep inside the nearest function named `random_choice` in `crates/core/src/game.rs`. It joins current AST ranges with the generated mutation inventory, resolving each approved replacement to exactly one mutation, then writes its current identity and rationale to `excluded.json`. Fully anchored, escaped filters pass those resolved names to cargo-mutants; there are no stored source coordinates. Scan inventory and outcomes must reconcile with the remaining eligible set; excluded results cannot silently become catches. Local and manual CI use this same path despite `--no-config`.
 
-If any expected name is missing, setup fails **before baseline or mutation evaluation** and reports source drift. Review the policy when source coordinates, generator/choice behavior, or quality requirements change; do not widen filters to a whole function to avoid that review. `excluded.json` can contain partial matches on a failed setup, but those are not evidence of a completed assessment. Filtering never rewrites results from earlier scans.
+Line movement, whitespace, comments and formatting do not require policy edits. If a target expression is missing or ambiguous, or its approved mutation cannot be uniquely resolved, setup fails **before baseline or mutation evaluation**. Review the policy when the target expressions, owning function/file, generator/choice behavior or quality requirements change; do not widen filters to a whole function to avoid that review. Recorded AST matches and generated inventory remain available after setup failure, but are not evidence of a completed assessment. Filtering never rewrites results from earlier scans.
 
 ## Reading results
 
@@ -75,19 +75,20 @@ The output directory includes:
 - `metadata.json`: source revision, actual versions, command arguments, budget/concurrency, relevant environment/resources, timestamps, and process-cleanup records.
 - `checkout.txt` and `source.patch`: checkout state and tracked differences from `HEAD`. A dirty checkout is allowed and explicitly recorded; untracked source contents are not captured by the patch, so preserve them separately if needed for reproduction.
 - `inventory.json`: the complete generated inventory before repository policy exclusions, including names, source spans, and diffs.
-- `excluded.json`: exact matching mutation records and the policy reason, separate from evaluation outcomes.
+- `ast-matches.json`: ast-grep's structural matches, source ranges and rule identities; `metadata.json` records the actual inline rules and tool version.
+- `excluded.json`: the seven resolved current mutation records and policy reason, separate from evaluation outcomes.
 - `console.log` and setup-command output/stderr files.
 - `mutants.out/`: the tool's shuffled eligible inventory, baseline and mutation logs, diffs, and incremental outcomes/category lists.
 
 On early setup failure, inventory, baseline, or outcomes may not exist. On forced interruption, `outcomes.json` may be truncated; raw files remain available and parsing failure is reported instead of claiming reconciled counts. Inspect local patches/logs for sensitive data before sharing them.
 
-Authoritative references: [full-name mutation filtering](https://mutants.rs/filter_mutants.html), [outcomes and how to investigate survivors](https://mutants.rs/using-results.html#mutant-outcomes), [timeouts](https://mutants.rs/timeouts.html), [exit codes](https://mutants.rs/exit-codes.html), [copied-tree safety](https://mutants.rs/cautions.html), and [raw reports](https://mutants.rs/mutants-out.html). The runner's interpretation is pinned to 27.1.0; its raw format is not guaranteed stable across tool versions. Linux cleanup uses [session IDs from `/proc/PID/stat`](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html) because a single process-group kill misses Cargo's separately grouped children.
+Authoritative references: [ast-grep structural patterns](https://ast-grep.github.io/guide/pattern-syntax.html), [relational scope](https://ast-grep.github.io/guide/rule-config/relational-rule.html), [zero-based JSON ranges](https://ast-grep.github.io/guide/tools/json.html), [full-name mutation filtering](https://mutants.rs/filter_mutants.html), [outcomes and how to investigate survivors](https://mutants.rs/using-results.html#mutant-outcomes), [timeouts](https://mutants.rs/timeouts.html), [exit codes](https://mutants.rs/exit-codes.html), [copied-tree safety](https://mutants.rs/cautions.html), and [raw reports](https://mutants.rs/mutants-out.html). The runner's interpretation is pinned to 27.1.0; its raw format is not guaranteed stable across tool versions. Linux cleanup uses [session IDs from `/proc/PID/stat`](https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html) because a single process-group kill misses Cargo's separately grouped children.
 
 ## Manual CI workflow
 
 Once `.github/workflows/mutation-tests.yml` is on the default branch, open **Actions → Manual core mutation tests → Run workflow**. There are no push, PR, or scheduled mutation scans. Select the revision to assess; the workflow must exist on the selected revision as well. GitHub's [manual trigger documentation](https://docs.github.com/en/actions/how-tos/managing-workflow-runs-and-deployments/managing-workflow-runs/manually-running-a-workflow) describes the default-branch prerequisite.
 
-CI installs cargo-mutants 27.1.0 with its lockfile in runner temporary storage, then invokes **the same Python command** with the same 600-second/two-worker defaults. The mutation step has a 12-minute safety timeout and the job a 30-minute outer timeout, leaving room for installation, cleanup, and upload. Installation has its own 15-minute limit and is outside the runner's mutation budget. These provisional settings are subject to measured CI performance and findings review, not a guarantee based on local workstation timing.
+CI installs cargo-mutants 27.1.0 and ast-grep 0.51.0 with their lockfiles in runner temporary storage, then invokes **the same Python command** with the same 600-second/two-worker defaults. The mutation step has a 12-minute safety timeout and the job a 30-minute outer timeout, leaving room for installation, cleanup, and upload. Installation has its own 15-minute limit and is outside the runner's mutation budget. These provisional settings are subject to measured CI performance and findings review, not a guarantee based on local workstation timing.
 
 The run summary displays `summary.md`; download **core-mutation-reports** from the run's Artifacts section for the complete available evidence. Artifacts are retained for **7 days**. Upload and summary steps run even after an earlier failure and fail if required output is missing; neither masks the execution step's failure. A cancelled job or lost runner may still prevent publication, so a missing artifact is not evidence of a successful scan.
 
@@ -97,4 +98,4 @@ The run summary displays `summary.md`; download **core-mutation-reports** from t
 python3 scripts/test_mutation_runner.py
 ```
 
-This exercises the public CLI with controlled external Cargo/report fixtures and real process cleanup, without executing mutation tests or changing gameplay tests. Ordinary CI runs these checks, not a mutation scan. They cover the seven policy exclusions and nearby mutations that must remain eligible, source-drift and ignored-filter failures, outcome/status propagation, baseline failure/timeout, partial counts, malformed/missing evidence, unsafe arguments/output locations, elapsed deadlines, and cancellation with children in separate process groups. They do not validate cargo-mutants itself or GitHub artifact transport; those require a real local scan and a manual CI run, respectively.
+This requires ast-grep 0.51.0 and exercises the public CLI in a temporary clone with real structural parsing, a small Rust source fixture, controlled external Cargo/report fixtures and real process cleanup. It does not execute mutation tests or change gameplay tests. Ordinary CI installs the pinned parser and runs these checks, not a mutation scan. They cover all seven exclusion identities, nearby eligible operators/functions/files, moved and compactly reformatted source, non-ASCII character columns, missing/ambiguous targets, parser version/failure and ignored-filter cases, outcome/status propagation, baseline failure/timeout, partial counts, malformed/missing evidence, unsafe arguments/output locations, elapsed deadlines, and cancellation with children in separate process groups. They do not validate cargo-mutants itself or GitHub artifact transport; those require a real local scan and a manual CI run, respectively.

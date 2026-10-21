@@ -22,43 +22,52 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
     (binary / "cargo").chmod(0o755)
     (binary / "rustc").write_text("#!/bin/sh\nprintf 'rustc fixture\\n'\n")
     (binary / "rustc").chmod(0o755)
-    env = dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}")
+    ast_grep = shutil.which("ast-grep")
+    assert ast_grep, "ast-grep 0.51.0 is required for real-parser fixture checks"
+    (binary / "ast-grep").write_text('''#!/usr/bin/env python3
+import os, sys
+if os.environ.get("FAKE_MODE") == "wrong_ast_version" and sys.argv[1:] == ["--version"]:
+    print("ast-grep 0.0.0")
+elif os.environ.get("FAKE_MODE") == "ast_error" and sys.argv[1] == "scan":
+    sys.exit(42)
+else:
+    os.execv(os.environ["REAL_AST_GREP"], [os.environ["REAL_AST_GREP"], *sys.argv[1:]])
+''')
+    (binary / "ast-grep").chmod(0o755)
+    checkout = base / "checkout"
+    subprocess.run(["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(checkout)], check=True)
+    shutil.copyfile(RUNNER, checkout / "scripts/run_mutation_tests.py")
+    source_path = checkout / "crates/core/src/game.rs"
+    source = (ROOT / "scripts/fixtures/mutation_rng.rs").read_text()
+    source_path.write_text(source)
+    runner = checkout / "scripts/run_mutation_tests.py"
+    env = dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}", REAL_AST_GREP=ast_grep)
     print("Checking seven policy exclusions and nearby eligible mutations...", flush=True)
     output = base / "rng-policy"
     result = subprocess.run(
-        [sys.executable, str(RUNNER), "--output", str(output)], cwd=base,
+        [sys.executable, str(runner), "--output", str(output)], cwd=base,
         env=dict(env, FAKE_MODE="rng_exclusions"), text=True, capture_output=True, timeout=15,
     )
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     summary = json.loads((output / "summary.json").read_text())
     assert summary["counts"] == {
-        "generated": 16, "excluded": 7, "eligible": 9,
-        "attempted": 9, "completed": 9, "untested": 0, "interrupted": 0,
-        "caught": 9, "surviving": 0, "unviable": 0, "timed_out": 0,
+        "generated": 17, "excluded": 7, "eligible": 10,
+        "attempted": 10, "completed": 10, "untested": 0, "interrupted": 0,
+        "caught": 10, "surviving": 0, "unviable": 0, "timed_out": 0,
     }, summary
     excluded = json.loads((output / "excluded.json").read_text())
     assert "#38" in excluded["reason"] and len(excluded["mutations"]) == 7
     excluded_names = {m["name"] for m in excluded["mutations"]}
-    assert excluded_names == {
-        "crates/core/src/game.rs:567:42: replace % with / in random_choice",
-        "crates/core/src/game.rs:571:33: replace >> with << in random_choice",
-        "crates/core/src/game.rs:572:24: replace ^ with | in random_choice",
-        "crates/core/src/game.rs:572:24: replace ^ with & in random_choice",
-        "crates/core/src/game.rs:572:33: replace >> with << in random_choice",
-        "crates/core/src/game.rs:573:24: replace >> with << in random_choice",
-        "crates/core/src/game.rs:574:18: replace >= with < in random_choice",
-    }, excluded_names
+    expected_ids = {"threshold:/", "shift30:<<", "xor27:|", "xor27:&",
+                    "shift27:<<", "shift31:<<", "acceptance:<"}
+    assert {m["fixture_id"] for m in excluded["mutations"]} == expected_ids, excluded
     generated_names = {m["name"] for m in json.loads((output / "inventory.json").read_text())}
     eligible_names = {m["name"] for m in json.loads((output / "mutants.out/mutants.json").read_text())}
     assert generated_names == excluded_names | eligible_names
     assert not excluded_names & eligible_names
-    assert {
-        "crates/core/src/game.rs:575:27: replace % with / in random_choice",
-        "crates/core/src/game.rs:567:42: replace % with * in random_choice",
-        "crates/core/src/game.rs:567:42: replace % with / in other_random_choice",
-        "crates/core/src/game.rs:567:42: replace % with / in random_choice_extra",
-        "crates/core/src/other.rs:567:42: replace % with / in random_choice",
-    } <= eligible_names, eligible_names
+    eligible = json.loads((output / "mutants.out/mutants.json").read_text())
+    negative_ids = {"return-mod:/", "threshold:*", "other-fn:/", "similar-fn:/", "other-file:/", "xor30:|"}
+    assert negative_ids <= {m.get("fixture_id") for m in eligible}, eligible
     readable = (output / "summary.md").read_text()
     assert "Excluded by policy" in readable and excluded["reason"] in readable
     assert all(f"`{name}`" in readable for name in excluded_names)
@@ -67,10 +76,28 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
     workflow = (ROOT / ".github/workflows/mutation-tests.yml").read_text()
     assert 'run: python3 scripts/run_mutation_tests.py --output "$MUTATION_REPORTS"' in workflow
 
+    policy_counts = summary["counts"]
+    for case, changed in [("moved", "\n" * 40 + source), ("compact", source.replace("\n", " "))]:
+        print(f"Checking {case} Rust with real ast-grep...", flush=True)
+        source_path.write_text(changed)
+        output = base / case
+        result = subprocess.run(
+            [sys.executable, str(runner), "--output", str(output)], cwd=base,
+            env=dict(env, FAKE_MODE="rng_exclusions"), text=True, capture_output=True, timeout=15,
+        )
+        assert result.returncode == 0, (case, result.stdout, result.stderr)
+        assert json.loads((output / "summary.json").read_text())["counts"] == policy_counts
+        selected = json.loads((output / "excluded.json").read_text())["mutations"]
+        assert {m["fixture_id"] for m in selected} == expected_ids
+        assert {m["name"] for m in selected} != excluded_names, "fixture coordinates did not move"
+        eligible = json.loads((output / "mutants.out/mutants.json").read_text())
+        assert negative_ids <= {m.get("fixture_id") for m in eligible}
+    source_path.write_text(source)
+
     print("Checking mixed outcomes and readable reports...", flush=True)
     output = base / "mixed"
     result = subprocess.run(
-        [sys.executable, str(RUNNER), "--output", str(output)],
+        [sys.executable, str(runner), "--output", str(output)],
         cwd=base, env=env, text=True, capture_output=True, timeout=15,
     )
     assert result.returncode == 3, (result.returncode, result.stdout, result.stderr)
@@ -88,13 +115,18 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
 
     for mode, expected in [("clean", 0), ("survivor", 2), ("timeout_outcome", 3),
                            ("baseline_failure", 4), ("baseline_timeout", 4), ("tool_error", 70),
-                           ("wrong_version", 1), ("empty", 1), ("exclusion_drift", 1),
+                           ("wrong_version", 1), ("wrong_ast_version", 1), ("ast_error", 1),
+                           ("empty", 1), ("exclusion_drift", 1), ("ambiguous_target", 1),
                            ("ignored_exclusions", 1), ("excluded_outcome", 1), ("truncated", 1),
                            ("missing_diff", 1), ("missing_diff_reference", 1)]:
         print(f"Checking {mode.replace('_', ' ')} (expected exit {expected})...", flush=True)
         output = base / mode
+        changed = source.replace(">> 27", ">> 28") if mode == "exclusion_drift" else source
+        if mode == "ambiguous_target":
+            changed = source.replace("let threshold =", "let duplicate = count.wrapping_neg() % count; let threshold =")
+        source_path.write_text(changed)
         result = subprocess.run(
-            [sys.executable, str(RUNNER), "--output", str(output)], cwd=base,
+            [sys.executable, str(runner), "--output", str(output)], cwd=base,
             env=dict(env, FAKE_MODE=mode), text=True, capture_output=True, timeout=15,
         )
         assert result.returncode == expected, (mode, result.returncode, result.stdout, result.stderr)
@@ -108,18 +140,24 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
             assert summary["complete"]
         else:
             assert not summary["complete"], summary
-        if mode in ("empty", "exclusion_drift"):
+        if mode in ("empty", "exclusion_drift", "ambiguous_target", "wrong_ast_version", "ast_error"):
             commands = json.loads((output / "metadata.json").read_text())["commands"]
             assert not any("--baseline=run" in command for command in commands), commands
-            if mode == "exclusion_drift":
-                assert "RNG exclusion source drift" in summary["reason"]
+            expected_reason = {
+                "empty": "eligible inventory must not be empty",
+                "exclusion_drift": "RNG exclusion source drift",
+                "ambiguous_target": "expected one AST match for threshold, got 2",
+                "wrong_ast_version": "ast-grep 0.51.0 is required",
+                "ast_error": "ast-grep exited 42",
+            }
+            assert expected_reason[mode] in summary["reason"], summary
         if mode == "ignored_exclusions":
             assert "scan inventory differs" in summary["reason"]
         if mode == "excluded_outcome":
             assert "unexpected or duplicate mutation outcome" in summary["reason"]
 
     print("Checking worker override and automatic output directory...", flush=True)
-    result = subprocess.run([sys.executable, str(RUNNER), "--jobs", "1"], cwd=base,
+    result = subprocess.run([sys.executable, str(runner), "--jobs", "1"], cwd=base,
                             env=dict(env, TMPDIR=str(base), FAKE_MODE="clean", EXPECT_JOBS="1"),
                             text=True, capture_output=True, timeout=15)
     assert result.returncode == 0, (result.stdout, result.stderr)
@@ -129,11 +167,11 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
     print("Checking invalid arguments and unsafe output locations...", flush=True)
     # Unsafe inputs must fail before creating reports or launching Cargo.
     for options in [["--budget", "nan"], ["--budget", "inf"], ["--jobs", "0"],
-                    ["--output", str(base / "clean")], ["--output", str(ROOT / "must-not-exist")]]:
-        result = subprocess.run([sys.executable, str(RUNNER), *options], cwd=base,
+                    ["--output", str(base / "clean")], ["--output", str(checkout / "must-not-exist")]]:
+        result = subprocess.run([sys.executable, str(runner), *options], cwd=base,
                                 env=env, text=True, capture_output=True, timeout=15)
         assert result.returncode == 2, (options, result.stdout, result.stderr)
-    assert not (ROOT / "must-not-exist").exists()
+    assert not (checkout / "must-not-exist").exists()
 
     print("Checking mutation timeout cleanup (intentional 3-second deadline)...", flush=True)
     # A separate child process group must not escape the runner's elapsed deadline.
@@ -141,7 +179,7 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
     output = base / "timeout"
     try:
         result = subprocess.run(
-            [sys.executable, str(RUNNER), "--budget", "3", "--output", str(output)],
+            [sys.executable, str(runner), "--budget", "3", "--output", str(output)],
             cwd=base, env=dict(env, FAKE_MODE="hang", CHILD_PID_FILE=str(pid_file)),
             text=True, capture_output=True, timeout=15,
         )
@@ -169,7 +207,7 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
         pid_file = base / f"{mode}-cancel-{cancel}.pid"
         output = base / f"{mode}-cancel-{cancel}"
         process = subprocess.Popen(
-            [sys.executable, str(RUNNER), "--budget", "10" if cancel else "3", "--output", str(output)],
+            [sys.executable, str(runner), "--budget", "10" if cancel else "3", "--output", str(output)],
             cwd=base, env=dict(env, FAKE_MODE=mode, CHILD_PID_FILE=str(pid_file)),
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )

@@ -19,22 +19,22 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "27.1.0"
+AST_GREP_VERSION = "0.51.0"
 CARGO_ARGS = [
     "cargo", "mutants", "--package=exploderous-core", "--test-package=exploderous-core",
     "--cargo-arg=--locked", "--cargo-arg=--all-targets", "--no-config",
 ]
 OUTCOMES = {"CaughtMutant": "caught", "MissedMutant": "surviving",
             "Unviable": "unviable", "Timeout": "timed_out"}
-# Exact, reviewed source locations: drift requires policy review, not a broader match.
-RNG_EXCLUSIONS = (
-    "crates/core/src/game.rs:567:42: replace % with / in random_choice",
-    "crates/core/src/game.rs:571:33: replace >> with << in random_choice",
-    "crates/core/src/game.rs:572:24: replace ^ with | in random_choice",
-    "crates/core/src/game.rs:572:24: replace ^ with & in random_choice",
-    "crates/core/src/game.rs:572:33: replace >> with << in random_choice",
-    "crates/core/src/game.rs:573:24: replace >> with << in random_choice",
-    "crates/core/src/game.rs:574:18: replace >= with < in random_choice",
-)
+# Structural expressions, original operators and approved replacements, never coordinates.
+RNG_RULES = {
+    "threshold": ("count.wrapping_neg() % count", "%", ("/",)),
+    "shift30": ("value >> 30", ">>", ("<<",)),
+    "xor27": ("value ^ (value >> 27)", "^", ("|", "&")),
+    "shift27": ("value >> 27", ">>", ("<<",)),
+    "shift31": ("value >> 31", ">>", ("<<",)),
+    "acceptance": ("value >= threshold", ">=", ("<",)),
+}
 RNG_EXCLUSION_REASON = (
     "Policy exclusion approved in #38: six known RNG-quality mutations and one "
     "mutant nontermination case are outside this assessment's scope. "
@@ -110,13 +110,28 @@ def stop_session(child):
             signal.signal(signum, handler)
 
 
-def record_exclusions(output):
+def select_exclusions(output):
     inventory = json.loads((output / "inventory.json").read_text())
-    excluded = [m for m in inventory if m["name"] in RNG_EXCLUSIONS]
-    save(output / "excluded.json", {"reason": RNG_EXCLUSION_REASON, "mutations": excluded})
-    missing = set(RNG_EXCLUSIONS) - {m["name"] for m in excluded}
-    if missing:
-        raise ValueError(f"RNG exclusion source drift: review #38 before scanning; missing {sorted(missing)}")
+    matches = json.loads((output / "ast-matches.json").read_text())
+    excluded = []
+    for rule, (_, operator, replacements) in RNG_RULES.items():
+        nodes = [m for m in matches if m["ruleId"] == rule]
+        if len(nodes) != 1:
+            raise ValueError(f"RNG exclusion source drift: expected one AST match for {rule}, got {len(nodes)}")
+        node = nodes[0]
+        # Both tools use character columns; ast-grep is zero-based, cargo-mutants one-based.
+        start, end = [tuple(node["range"][key][axis] + 1 for axis in ("line", "column"))
+                      for key in ("start", "end")]
+        for replacement in replacements:
+            candidates = [m for m in inventory if m.get("genre") == "BinaryOperator"
+                          and m["file"] == node["file"]
+                          and m["name"].endswith(f": replace {operator} with {replacement} in random_choice")
+                          and start <= (m["span"]["start"]["line"], m["span"]["start"]["column"])
+                          < (m["span"]["end"]["line"], m["span"]["end"]["column"]) <= end]
+            if len(candidates) != 1:
+                raise ValueError(f"RNG exclusion source drift: expected one mutation for {rule} -> {replacement}, got {len(candidates)}")
+            excluded.append(candidates[0])
+    return excluded
 
 
 def summarize(output):
@@ -126,8 +141,8 @@ def summarize(output):
         raise ValueError("inventory must contain unique mutations")
     exclusions = json.loads((output / "excluded.json").read_text())
     excluded = {m["name"] for m in exclusions["mutations"]}
-    if (len(excluded) != len(exclusions["mutations"]) or excluded != set(RNG_EXCLUSIONS)
-            or not excluded <= generated):
+    if (len(excluded) != 7 or len(excluded) != len(exclusions["mutations"])
+            or excluded != {m["name"] for m in select_exclusions(output)} or not excluded <= generated):
         raise ValueError("excluded inventory does not match the approved policy")
     names = generated - excluded
     if not names:
@@ -276,15 +291,29 @@ def main():
         metadata["cargo_mutants"] = required(["cargo", "mutants", "--version"], "mutants-version.txt")
         if metadata["cargo_mutants"] != f"cargo-mutants {VERSION}":
             raise RuntimeError(f"cargo-mutants {VERSION} is required; no tools were installed or updated")
+        metadata["ast_grep"] = required(["ast-grep", "--version"], "ast-grep-version.txt")
+        if metadata["ast_grep"] != f"ast-grep {AST_GREP_VERSION}":
+            raise RuntimeError(f"ast-grep {AST_GREP_VERSION} is required; no tools were installed or updated")
         metadata["rustc"] = required(["rustc", "--version", "--verbose"], "rustc-version.txt")
         metadata["cargo"] = required(["cargo", "--version"], "cargo-version.txt")
         code = run(CARGO_ARGS + ["--list", "--json", "--diff"], "inventory.json", separate_errors=True)
         if code:
             raise RuntimeError(f"mutation inventory exited {code}; see inventory.json.stderr")
-        record_exclusions(output)
+        rules = "\n---\n".join(json.dumps({
+            "id": rule, "language": "Rust", "severity": "info",
+            "rule": {"pattern": pattern, "inside": {
+                "kind": "function_item", "has": {"field": "name", "regex": "^random_choice$"},
+                "stopBy": {"kind": "function_item"}}},
+        }) for rule, (pattern, _, _) in RNG_RULES.items())
+        code = run(["ast-grep", "scan", "--inline-rules", rules, "--json=compact",
+                    "crates/core/src/game.rs"], "ast-matches.json", separate_errors=True)
+        if code:
+            raise RuntimeError(f"ast-grep exited {code}; see ast-matches.json.stderr")
+        excluded = select_exclusions(output)
+        save(output / "excluded.json", {"reason": RNG_EXCLUSION_REASON, "mutations": excluded})
         # Reject an empty/malformed eligible inventory before starting a scan.
         summarize(output)
-        filters = [arg for name in RNG_EXCLUSIONS for arg in ("--exclude-re", f"^{re.escape(name)}$")]
+        filters = [arg for m in excluded for arg in ("--exclude-re", f"^{re.escape(m['name'])}$")]
         command = CARGO_ARGS + filters + ["--baseline=run", "--shuffle", f"--jobs={args.jobs}",
                                 "--copy-target=false", "--colors=never", "--output", str(output)]
         exit_code = run(command, "console.log")

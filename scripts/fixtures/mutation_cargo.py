@@ -11,6 +11,22 @@ import sys
 import time
 
 
+def mutation(marker, operator, replacement, function="random_choice", file="crates/core/src/game.rs"):
+    source = Path("crates/core/src/game.rs").read_text()
+    tag = f"/* {marker} */"
+    offset = source.index(operator, source.index(tag) + len(tag))
+    prefix = source[:offset]
+    line, column = prefix.count("\n") + 1, len(prefix.rsplit("\n", 1)[-1]) + 1
+    return {
+        "name": f"{file}:{line}:{column}: replace {operator} with {replacement} in {function}",
+        "file": file, "replacement": replacement, "genre": "BinaryOperator",
+        "function": {"function_name": function}, "package": "exploderous-core",
+        "span": {"start": {"line": line, "column": column},
+                 "end": {"line": line, "column": column + len(operator)}},
+        "diff": "fixture diff", "fixture_id": f"{marker}:{replacement}",
+    }
+
+
 def main():
     args = sys.argv[1:]
     if args == ["--sleep-child"]:
@@ -31,33 +47,30 @@ def main():
                  "--cargo-arg=--locked", "--cargo-arg=--all-targets", "--no-config"]:
         assert flag in args, args
     assert not any(a.startswith(("--exclude=", "--file", "--in-place", "--workspace")) for a in args)
-    names = [f"crates/core/src/lib.rs:{i}:1: replace == with !=" for i in range(1, 5)]
+    inventory = [{"name": f"crates/core/src/lib.rs:{i}:1: replace == with !=",
+                  "diff": "fixture diff", "package": "exploderous-core"} for i in range(1, 5)]
     rng = [
-        "crates/core/src/game.rs:567:42: replace % with / in random_choice",
-        "crates/core/src/game.rs:571:33: replace >> with << in random_choice",
-        "crates/core/src/game.rs:572:24: replace ^ with | in random_choice",
-        "crates/core/src/game.rs:572:24: replace ^ with & in random_choice",
-        "crates/core/src/game.rs:572:33: replace >> with << in random_choice",
-        "crates/core/src/game.rs:573:24: replace >> with << in random_choice",
-        "crates/core/src/game.rs:574:18: replace >= with < in random_choice",
+        mutation("threshold", "%", "/"), mutation("shift30", ">>", "<<"),
+        mutation("xor27", "^", "|"), mutation("xor27", "^", "&"),
+        mutation("shift27", ">>", "<<"), mutation("shift31", ">>", "<<"),
+        mutation("acceptance", ">=", "<"),
     ]
-    names += rng
+    inventory += rng
     if mode == "rng_exclusions":
-        names += [
-            "crates/core/src/game.rs:575:27: replace % with / in random_choice",
-            "crates/core/src/game.rs:567:42: replace % with * in random_choice",
-            "crates/core/src/game.rs:567:42: replace % with / in other_random_choice",
-            "crates/core/src/game.rs:567:42: replace % with / in random_choice_extra",
-            "crates/core/src/other.rs:567:42: replace % with / in random_choice",
+        inventory += [
+            mutation("return-mod", "%", "/"), mutation("threshold", "%", "*"),
+            mutation("other-fn", "%", "/", "other_random_choice"),
+            mutation("similar-fn", "%", "/", "random_choice_extra"),
+            mutation("threshold", "%", "/", file="crates/core/src/other.rs"),
+            mutation("xor30", "^", "|"),
         ]
+        inventory[-2]["fixture_id"] = "other-file:/"
     if mode == "empty":
-        names = rng
-    if mode == "exclusion_drift":
-        names[-1] = names[-1].replace(":574:18:", ":575:18:")
+        inventory = rng
     patterns = [args[i + 1] for i, arg in enumerate(args) if arg == "--exclude-re"]
     if "--list" not in args and mode != "ignored_exclusions":
-        names = [name for name in names if not any(re.search(pattern, name) for pattern in patterns)]
-    inventory = [{"name": name, "diff": "fixture diff", "package": "exploderous-core"} for name in names]
+        inventory = [m for m in inventory if not any(re.search(p, m["name"]) for p in patterns)]
+    names = [m["name"] for m in inventory]
     if "--list" in args:
         assert "--json" in args and "--diff" in args and not patterns
         print(json.dumps(inventory))
@@ -69,7 +82,7 @@ def main():
     (out / "diff").mkdir()
     (out / "mutants.json").write_text(json.dumps(list(reversed(inventory))))
     if mode == "excluded_outcome":
-        names.append(rng[0])
+        names.append(rng[0]["name"])
     (out / "log/baseline.log").write_text("\n*** baseline\n\n*** result: Success\n")
     rows = [{"scenario": "Baseline", "summary": "Success", "log_path": "log/baseline.log",
              "diff_path": None, "phase_results": []}]

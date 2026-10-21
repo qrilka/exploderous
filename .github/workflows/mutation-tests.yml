@@ -14,11 +14,12 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Prepare reports and install pinned cargo-mutants
+      - name: Prepare reports and install pinned mutation tools
         timeout-minutes: 15
         run: |
           echo "MUTATION_REPORTS=$RUNNER_TEMP/core-mutation-reports" >> "$GITHUB_ENV"
           cargo install cargo-mutants --version 27.1.0 --locked --root "$RUNNER_TEMP/mutation-tools"
+          cargo install ast-grep --version 0.51.0 --locked --root "$RUNNER_TEMP/mutation-tools"
           echo "$RUNNER_TEMP/mutation-tools/bin" >> "$GITHUB_PATH"
       - name: Run shared mutation command
         timeout-minutes: 12
