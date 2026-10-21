@@ -294,8 +294,13 @@ impl Game {
             Direction::Down,
             Direction::Left,
         ] {
+            let axis_length = match direction {
+                Direction::Up | Direction::Down => self.arena.height(),
+                Direction::Right | Direction::Left => self.arena.width(),
+            };
             let mut cell = origin;
-            for _ in 0..reach {
+            // A straight ray can cover at most axis_length - 1 Cells beyond its origin.
+            for _ in 0..reach.min(u64::from(axis_length - 1)) {
                 let Some(next) = self.arena.neighbor(cell, direction) else {
                     break;
                 };

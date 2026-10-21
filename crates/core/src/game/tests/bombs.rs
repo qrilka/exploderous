@@ -5,6 +5,7 @@ use crate::game::{
 };
 
 mod movement;
+mod propagation;
 
 fn game(layout: &str, position: Position, rules: GameRules, tick: u64) -> Game {
     Game::new(scenario(layout, position, rules), tick)
