@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -24,6 +25,21 @@ CARGO_ARGS = [
 ]
 OUTCOMES = {"CaughtMutant": "caught", "MissedMutant": "surviving",
             "Unviable": "unviable", "Timeout": "timed_out"}
+# Exact, reviewed source locations: drift requires policy review, not a broader match.
+RNG_EXCLUSIONS = (
+    "crates/core/src/game.rs:567:42: replace % with / in random_choice",
+    "crates/core/src/game.rs:571:33: replace >> with << in random_choice",
+    "crates/core/src/game.rs:572:24: replace ^ with | in random_choice",
+    "crates/core/src/game.rs:572:24: replace ^ with & in random_choice",
+    "crates/core/src/game.rs:572:33: replace >> with << in random_choice",
+    "crates/core/src/game.rs:573:24: replace >> with << in random_choice",
+    "crates/core/src/game.rs:574:18: replace >= with < in random_choice",
+)
+RNG_EXCLUSION_REASON = (
+    "Policy exclusion approved in #38: six known RNG-quality mutations and one "
+    "mutant nontermination case are outside this assessment's scope. "
+    "Excluded is not caught or proven equivalent; other RNG mutations remain eligible."
+)
 
 
 def save(path, value):
@@ -94,11 +110,28 @@ def stop_session(child):
             signal.signal(signum, handler)
 
 
+def record_exclusions(output):
+    inventory = json.loads((output / "inventory.json").read_text())
+    excluded = [m for m in inventory if m["name"] in RNG_EXCLUSIONS]
+    save(output / "excluded.json", {"reason": RNG_EXCLUSION_REASON, "mutations": excluded})
+    missing = set(RNG_EXCLUSIONS) - {m["name"] for m in excluded}
+    if missing:
+        raise ValueError(f"RNG exclusion source drift: review #38 before scanning; missing {sorted(missing)}")
+
+
 def summarize(output):
     inventory = json.loads((output / "inventory.json").read_text())
-    names = {m["name"] for m in inventory}
-    if len(names) != len(inventory) or not names:
-        raise ValueError("inventory must contain unique mutations and must not be empty")
+    generated = {m["name"] for m in inventory}
+    if len(generated) != len(inventory):
+        raise ValueError("inventory must contain unique mutations")
+    exclusions = json.loads((output / "excluded.json").read_text())
+    excluded = {m["name"] for m in exclusions["mutations"]}
+    if (len(excluded) != len(exclusions["mutations"]) or excluded != set(RNG_EXCLUSIONS)
+            or not excluded <= generated):
+        raise ValueError("excluded inventory does not match the approved policy")
+    names = generated - excluded
+    if not names:
+        raise ValueError("eligible inventory must not be empty")
     raw = output / "mutants.out"
     scan_inventory = raw / "mutants.json"
     if scan_inventory.exists():
@@ -133,11 +166,13 @@ def summarize(output):
         raise ValueError("mutation log and inventory counts do not reconcile")
     counts = dict.fromkeys(OUTCOMES.values(), 0)
     counts.update(Counter(mutations.values()))
-    counts.update(generated=len(names), attempted=attempted, completed=len(mutations),
-                  untested=len(names) - attempted, interrupted=attempted - len(mutations))
+    counts.update(generated=len(generated), excluded=len(excluded), eligible=len(names),
+                  attempted=attempted, completed=len(mutations), untested=len(names) - attempted,
+                  interrupted=attempted - len(mutations))
     complete = (bool(results.get("end_time")) and baseline == "Success"
                 and len(mutations) == len(names) and scan_inventory.is_file() and not errors)
-    return {"counts": counts, "baseline": baseline, "complete": complete, "evidence_errors": errors}
+    return {"counts": counts, "exclusions": exclusions, "baseline": baseline,
+            "complete": complete, "evidence_errors": errors}
 
 
 def report(output, summary):
@@ -148,15 +183,19 @@ def report(output, summary):
     if counts:
         lines += ["| Execution | Count |", "| --- | ---: |"]
         lines += [f"| {key} | {counts[key]} |" for key in
-                  ["generated", "attempted", "completed", "untested", "interrupted"]]
+                  ["generated", "excluded", "eligible", "attempted", "completed", "untested", "interrupted"]]
         lines += ["", "| Outcome | Count | Meaning |", "| --- | ---: | --- |",
                   f"| Caught | {counts['caught']} | Compiled; tests rejected the change. |",
                   f"| Surviving | {counts['surviving']} | Tests passed; possible gap or equivalent change. |",
                   f"| Unviable | {counts['unviable']} | Did not compile; inconclusive about tests. |",
                   f"| Timed out | {counts['timed_out']} | Evaluation exceeded its limit; not counted as caught. |"]
+    if exclusions := summary.get("exclusions"):
+        lines += ["", "## Excluded by policy", "", exclusions["reason"], ""]
+        lines += [f"- `{m['name']}`" for m in exclusions["mutations"]]
     lines += ["", *summary.get("evidence_errors", []),
               "Untested means never started; interrupted means started without a terminal outcome.",
-              "Generated = completed + untested + interrupted. Completed includes terminal timeouts, not successful test completion.",
+              "Generated = excluded + eligible. Eligible = completed + untested + interrupted.",
+              "Completed includes terminal timeouts, not successful test completion.",
               "Survivors are not automatically bugs; review required behavior before proposing fixes or exclusions.",
               "[Outcome interpretation](https://mutants.rs/using-results.html#mutant-outcomes) · "
               "[Timeouts](https://mutants.rs/timeouts.html) · [Exit codes](https://mutants.rs/exit-codes.html)",
@@ -242,9 +281,11 @@ def main():
         code = run(CARGO_ARGS + ["--list", "--json", "--diff"], "inventory.json", separate_errors=True)
         if code:
             raise RuntimeError(f"mutation inventory exited {code}; see inventory.json.stderr")
-        # Reject an empty/malformed inventory before starting a scan.
+        record_exclusions(output)
+        # Reject an empty/malformed eligible inventory before starting a scan.
         summarize(output)
-        command = CARGO_ARGS + ["--baseline=run", "--shuffle", f"--jobs={args.jobs}",
+        filters = [arg for name in RNG_EXCLUSIONS for arg in ("--exclude-re", f"^{re.escape(name)}$")]
+        command = CARGO_ARGS + filters + ["--baseline=run", "--shuffle", f"--jobs={args.jobs}",
                                 "--copy-target=false", "--colors=never", "--output", str(output)]
         exit_code = run(command, "console.log")
         metadata["cargo_mutants_exit_code"] = exit_code
@@ -268,7 +309,7 @@ def main():
             elif exit_code:
                 reason = f"Scan complete with findings or tool failure (exit {exit_code})"
             else:
-                reason = "Scan complete; all viable mutations were caught"
+                reason = "Scan complete; all viable eligible mutations were caught"
     except (OSError, ValueError, KeyError, TypeError) as error:
         summary = {"counts": None, "baseline": "Unknown", "complete": False}
         exit_code = exit_code or 1

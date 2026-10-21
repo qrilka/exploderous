@@ -23,6 +23,50 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
     (binary / "rustc").write_text("#!/bin/sh\nprintf 'rustc fixture\\n'\n")
     (binary / "rustc").chmod(0o755)
     env = dict(os.environ, PATH=f"{binary}:{os.environ['PATH']}")
+    print("Checking seven policy exclusions and nearby eligible mutations...", flush=True)
+    output = base / "rng-policy"
+    result = subprocess.run(
+        [sys.executable, str(RUNNER), "--output", str(output)], cwd=base,
+        env=dict(env, FAKE_MODE="rng_exclusions"), text=True, capture_output=True, timeout=15,
+    )
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    summary = json.loads((output / "summary.json").read_text())
+    assert summary["counts"] == {
+        "generated": 16, "excluded": 7, "eligible": 9,
+        "attempted": 9, "completed": 9, "untested": 0, "interrupted": 0,
+        "caught": 9, "surviving": 0, "unviable": 0, "timed_out": 0,
+    }, summary
+    excluded = json.loads((output / "excluded.json").read_text())
+    assert "#38" in excluded["reason"] and len(excluded["mutations"]) == 7
+    excluded_names = {m["name"] for m in excluded["mutations"]}
+    assert excluded_names == {
+        "crates/core/src/game.rs:567:42: replace % with / in random_choice",
+        "crates/core/src/game.rs:571:33: replace >> with << in random_choice",
+        "crates/core/src/game.rs:572:24: replace ^ with | in random_choice",
+        "crates/core/src/game.rs:572:24: replace ^ with & in random_choice",
+        "crates/core/src/game.rs:572:33: replace >> with << in random_choice",
+        "crates/core/src/game.rs:573:24: replace >> with << in random_choice",
+        "crates/core/src/game.rs:574:18: replace >= with < in random_choice",
+    }, excluded_names
+    generated_names = {m["name"] for m in json.loads((output / "inventory.json").read_text())}
+    eligible_names = {m["name"] for m in json.loads((output / "mutants.out/mutants.json").read_text())}
+    assert generated_names == excluded_names | eligible_names
+    assert not excluded_names & eligible_names
+    assert {
+        "crates/core/src/game.rs:575:27: replace % with / in random_choice",
+        "crates/core/src/game.rs:567:42: replace % with * in random_choice",
+        "crates/core/src/game.rs:567:42: replace % with / in other_random_choice",
+        "crates/core/src/game.rs:567:42: replace % with / in random_choice_extra",
+        "crates/core/src/other.rs:567:42: replace % with / in random_choice",
+    } <= eligible_names, eligible_names
+    readable = (output / "summary.md").read_text()
+    assert "Excluded by policy" in readable and excluded["reason"] in readable
+    assert all(f"`{name}`" in readable for name in excluded_names)
+    metadata = json.loads((output / "metadata.json").read_text())
+    assert any("--exclude-re" in command for command in metadata["commands"])
+    workflow = (ROOT / ".github/workflows/mutation-tests.yml").read_text()
+    assert 'run: python3 scripts/run_mutation_tests.py --output "$MUTATION_REPORTS"' in workflow
+
     print("Checking mixed outcomes and readable reports...", flush=True)
     output = base / "mixed"
     result = subprocess.run(
@@ -32,7 +76,8 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
     assert result.returncode == 3, (result.returncode, result.stdout, result.stderr)
     summary = json.loads((output / "summary.json").read_text())
     assert summary["counts"] == {
-        "generated": 4, "attempted": 4, "completed": 4, "untested": 0, "interrupted": 0,
+        "generated": 11, "excluded": 7, "eligible": 4,
+        "attempted": 4, "completed": 4, "untested": 0, "interrupted": 0,
         "caught": 1, "surviving": 1, "unviable": 1, "timed_out": 1,
     }, summary
     assert summary["baseline"] == "Success" and summary["complete"] is True
@@ -43,7 +88,8 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
 
     for mode, expected in [("clean", 0), ("survivor", 2), ("timeout_outcome", 3),
                            ("baseline_failure", 4), ("baseline_timeout", 4), ("tool_error", 70),
-                           ("wrong_version", 1), ("empty", 1), ("truncated", 1),
+                           ("wrong_version", 1), ("empty", 1), ("exclusion_drift", 1),
+                           ("ignored_exclusions", 1), ("excluded_outcome", 1), ("truncated", 1),
                            ("missing_diff", 1), ("missing_diff_reference", 1)]:
         print(f"Checking {mode.replace('_', ' ')} (expected exit {expected})...", flush=True)
         output = base / mode
@@ -62,6 +108,15 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
             assert summary["complete"]
         else:
             assert not summary["complete"], summary
+        if mode in ("empty", "exclusion_drift"):
+            commands = json.loads((output / "metadata.json").read_text())["commands"]
+            assert not any("--baseline=run" in command for command in commands), commands
+            if mode == "exclusion_drift":
+                assert "RNG exclusion source drift" in summary["reason"]
+        if mode == "ignored_exclusions":
+            assert "scan inventory differs" in summary["reason"]
+        if mode == "excluded_outcome":
+            assert "unexpected or duplicate mutation outcome" in summary["reason"]
 
     print("Checking worker override and automatic output directory...", flush=True)
     result = subprocess.run([sys.executable, str(RUNNER), "--jobs", "1"], cwd=base,
@@ -93,7 +148,8 @@ with tempfile.TemporaryDirectory(prefix="exploderous-mutation-check-") as direct
         assert result.returncode == 124, (result.stdout, result.stderr)
         summary = json.loads((output / "summary.json").read_text())
         assert summary["counts"] == {
-            "generated": 4, "attempted": 2, "completed": 1, "untested": 2, "interrupted": 1,
+            "generated": 11, "excluded": 7, "eligible": 4,
+            "attempted": 2, "completed": 1, "untested": 2, "interrupted": 1,
             "caught": 1, "surviving": 0, "unviable": 0, "timed_out": 0,
         }, summary
         pid = int(pid_file.read_text())
