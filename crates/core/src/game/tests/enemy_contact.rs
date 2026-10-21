@@ -1,4 +1,4 @@
-use super::support::{action, bomber, enemy, point};
+use super::support::{action, bomber, cell, enemy, point};
 use crate::game::{Direction, Game, GameRules, Outcome, Scenario, Terrain};
 
 #[test]
@@ -110,4 +110,98 @@ fn assisted_forward_contact_uses_the_time_spent_on_correction_first() {
         assert_eq!(game.character().position, point(1775, 513));
         assert_eq!(game.outcome(), outcome, "prefix={prefix}");
     }
+}
+
+#[test]
+fn late_contact_between_boundary_instants_causes_defeat() {
+    let initial = Scenario::new(
+        6,
+        1,
+        vec![Terrain::Floor; 6],
+        bomber(point(1024, 128)),
+        GameRules::new(2, 1024).unwrap(),
+    )
+    .unwrap()
+    .with_enemies(vec![enemy(7, point(128, 128))])
+    .unwrap();
+    let mut game = Game::new(initial, 0);
+    // The arena edge forces Right. Reach x=248 through ordinary movement.
+    for _ in 0..15 {
+        game.step(&[]).unwrap();
+    }
+    assert_eq!(game.character().position, point(1024, 128));
+    assert_eq!(game.enemies()[0].position, point(248, 128));
+    assert_eq!(game.outcome(), None);
+
+    game.step(&[action(Some(Direction::Left), false)]).unwrap();
+    // At t=3/4 the player is x=256 (Cell 1); at t=1 the enemy enters
+    // Cell 1. Both centres occupy Cell 0 only for 3/4 < t < 1.
+    assert_eq!(game.character().position, point(1, 128));
+    assert_eq!(game.enemies()[0].position, point(256, 128));
+    assert_eq!(game.outcome(), Some(Outcome::Defeat));
+}
+
+#[test]
+fn contact_around_an_assisted_bend_uses_only_the_actual_path() {
+    for (blocked, position, outcome) in [
+        (true, point(511, 1432), Some(Outcome::Defeat)),
+        (false, point(600, 1521), None),
+    ] {
+        let mut terrain = vec![Terrain::Floor; 4 * 6];
+        if blocked {
+            terrain[2 * 4 + 2] = Terrain::Block;
+        }
+        let initial = Scenario::new(
+            4,
+            6,
+            terrain,
+            bomber(point(600, 497)),
+            GameRules::new(2, 1024).unwrap(),
+        )
+        .unwrap()
+        .with_enemies(vec![enemy(7, point(384, 384))])
+        .unwrap();
+        let mut game = Game::new(initial, 0);
+        game.step(&[action(Some(Direction::Down), false)]).unwrap();
+        // The Block requires 89 Left, then 935 Down. Cell (1,1) is shared
+        // only for 88/1024 < t < 104/1024: x=512 and y=512 exclude its edges.
+        // Without the Block the actual path is straight Down, never through it.
+        assert_eq!(game.character().position, position, "blocked={blocked}");
+        // Any initial enemy heading stays in the same Cell for this tick.
+        assert_eq!(
+            game.arena().cell_containing(game.enemies()[0].position),
+            Some(cell(1, 1)),
+            "blocked={blocked}"
+        );
+        assert_eq!(game.outcome(), outcome, "blocked={blocked}");
+    }
+}
+
+#[test]
+fn early_contact_before_another_cell_crossing_causes_defeat() {
+    let initial = Scenario::new(
+        4,
+        1,
+        vec![Terrain::Floor; 4],
+        bomber(point(320, 128)),
+        GameRules::new(192, 512).unwrap(),
+    )
+    .unwrap()
+    .with_enemies(vec![enemy(7, point(896, 128))])
+    .unwrap();
+    let mut game = Game::new(initial, 0);
+    // The right arena edge forces Left; the clear corridor preserves that heading.
+    for _ in 0..48 {
+        game.step(&[]).unwrap();
+    }
+    assert_eq!(game.character().position, point(320, 128));
+    assert_eq!(game.enemies()[0].position, point(512, 128));
+    assert_eq!(game.outcome(), None);
+
+    game.step(&[action(Some(Direction::Right), false)]).unwrap();
+    // Both centres occupy Cell 1 only for 0 < t < 3/8. The player then
+    // enters Cell 2 at t=3/8 and Cell 3 at t=7/8; later travel cannot undo harm.
+    assert_eq!(game.character().position, point(832, 128));
+    assert_eq!(game.enemies()[0].position, point(504, 128));
+    assert_eq!(game.outcome(), Some(Outcome::Defeat));
 }
