@@ -18,9 +18,9 @@ Before creating a commit, read and follow `docs/agents/commit-attribution.md`.
 
 ## Agent skills
 
-### Issue tracker and ticket branches
+### Issue tracker and exploration
 
-Before starting ticket work, read `docs/agents/issue-tracker.md` for GitHub issue tracking and branch workflow.
+Before ticket work or project experiments, read `docs/agents/issue-tracker.md` for GitHub tracking, branches, and experiment artifacts.
 
 ### Triage labels
 
@@ -44,9 +44,9 @@ Use `Q1`–`Q4` as question headers; put full titles and explanations in the que
 
 For a reserved-label rejection, replace the offending option with a meaningful choice or remove it while retaining 2–4 authored choices, then retry. Custom answers use the tool's automatically appended row.
 
-## Documentation standards
+## Coding and documentation standards
 
-Before editing or reviewing documentation, read `CODING_STANDARDS.md`.
+Before planning or editing code or documentation, preparing review handoffs, or reviewing changes, read `CODING_STANDARDS.md`.
 
 ## Parallel reviews
 

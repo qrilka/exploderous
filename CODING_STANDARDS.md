@@ -7,11 +7,17 @@
 - Use newtypes when they enforce useful constraints or prevent mixing distinct domain concepts. Do not wrap primitives without a concrete benefit.
 - Distinguish raw input from validated domain values. Check context-dependent relationships when constructing the owning aggregate, and test rejection at the constructor that owns each invariant.
 
+## Review authority
+
+Distinguish maintainer-approved constraints from implementation choices in review handoffs. Trace constraints to the governing requirements or explicit approval; treat the author's rationale as a claim to verify, not a restriction on review conclusions.
+
 ## Interface review
 
 For a new public abstraction, identify the caller requirement that cannot be served by an existing owner or a function.
 
 ## Workflow review
+
+Before planning file changes, check touched files against the [file-size policy](README.md#pre-commit-file-size-check). If compliance requires extraction, keep the behavior-preserving move in a separate commit from the functional change; verify preserved APIs and test registration.
 
 For repository automation, review how users discover and activate it, the scope and trigger of each operation, and whether validation exercises the documented usage path.
 
@@ -34,6 +40,8 @@ For new or substantially rewritten tests, choose placement by responsibility and
 ## Documentation review
 
 Describe the current contract for a fresh reader. Name concrete requirements and operations; remove wording that only makes sense as a response to the preceding discussion.
+
+Lead findings reports with the problem, its observable consequence, and the suggested action. Explain specialist terms on first use; put exhaustive evidence behind links or in an appendix.
 
 Before editing, choose the owning document using this table. During review, check every added or changed section against that document's responsibility. Also check unchanged capability summaries affected by the delivered behavior, including README and roadmap sections; keep ticket progress in the issue tracker. Link to the owner instead of duplicating its content.
 

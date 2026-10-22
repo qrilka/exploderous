@@ -7,6 +7,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - A **spec issue** describes a feature or milestone: desired outcome, scope and non-goals, cross-cutting requirements, unresolved decisions, and feature-level acceptance gates. Create or refine it from the project direction before splitting multi-slice work.
 - An **implementation ticket** describes one implementable slice, with its own scope, acceptance checks, relevant design/spec links, and blocking dependencies. Make it self-contained enough to implement without copying the whole spec into it.
 - Small work can use one issue as both its spec and implementation ticket. For multi-slice work, use a parent spec issue with child implementation tickets. Link children as GitHub sub-issues where available; otherwise use a task list and a `Part of #<spec>` line. Represent blockers with native issue dependencies when available.
+- Before publishing a ticket split, assign every parent outcome to a child or an explicitly agreed deferral. Distinguish work excluded from one phase from work excluded from the overall feature.
 - Keep lasting behavior and invariants in the design, and consequential decision rationale in ADRs. If a spec or ticket changes a lasting rule, update the owning design (and ADR if warranted) before treating the issue as ready. Do not duplicate full design text in issue bodies; link to it and state only the slice-specific requirements.
 - When carrying behavior into a new spec, distinguish inherited contracts from newly proposed behavior and regression checks. Answer scope questions with the originating requirement.
 - The issue tracker is the source of truth for issue scope, acceptance gates, dependencies, and status. Reflect durable changes in the plan only when project direction or priority changes—not to mirror ticket progress.
@@ -23,8 +24,20 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - Before implementing, reviewing, or editing a ticket, resolve the target from the explicitly named issue or, if none is named, the active ticket branch; then read its live body and comments. Apply “this ticket” changes to that target and keep follow-ups separate unless named. If explicit instructions or existing changes conflict with the resolved target, clarify before editing; a clean checkout of another ticket's branch does not override an explicitly requested issue.
 - If authorization or issue state is disputed, compare the session log with GitHub's current state before changing, closing, or recreating an issue. Ask if those records do not resolve the scope or authorization.
 - When the user approves behavior that differs from acceptance criteria, update the issue before treating the work as ready for review; record user-confirmed manual acceptance gates in an issue comment.
+- Follow [change-planning guidance](../../CODING_STANDARDS.md#workflow-review) before planning ticket implementation.
 - Commit subjects describe the change; include ticket numbers only when explicitly requested.
 - Once ticket work passes its checks and review, use `/pr` to draft the PR body. Show the complete proposed PR title and body inline in chat before requesting approval; a questionnaire preview or file link alone is insufficient. Get explicit approval before creating the PR; approval to implement or push is not PR approval.
+
+## Updates and closeout
+
+- Use issues for durable scope and acceptance decisions and linked outcomes, including reports that are the ticket's deliverable. Keep transient execution progress in chat and implementation validation in the PR.
+- Update the current summary instead of appending repeated status reports; branch history already records routine commits.
+- At delivery boundaries, reconcile acceptance checklists, dependency links, readiness labels, and integration status against published evidence. Make tracking changes and close issues only within the authorized scope; otherwise surface the remaining closeout work.
+
+## Exploration files
+
+- Put temporary experiment helpers in a session scratch directory, such as one under `/tmp`, and maintained automation in the repository.
+- Retain evidence at its documented artifact location. Preserve a helper with it when needed for reproduction; this does not make the helper supported tooling.
 
 ## Conventions
 

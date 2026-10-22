@@ -1,5 +1,6 @@
 # Design Interviews
 
+- Interview answers settle the plan. Finish the open design decisions and confirm the shared understanding before requesting separate authorization to execute that design. An explicitly authorized prototype or playtest is limited to that experiment; it does not authorize implementation of the design.
 - When requesting approval, state exactly what is being approved and the available continuation options. Treat confirmation as authorizing only the stated scope.
 - When corrective feedback leaves materially different interpretations of the intended scope, confirm that scope before editing. Distinguish a request for explanation from a requested change.
 - Before implementing a noticeable change where the request/spec leaves materially different approaches open, show the alternatives and tradeoffs and ask the user which to use. This applies to domain/interface ownership, crate/test layout, representations, dependencies, and workflows—not just style. Skip trivial implementation details and decisions already settled by the user or spec.
