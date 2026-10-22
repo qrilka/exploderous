@@ -2,6 +2,8 @@
 
 Keep project workflow improvements in this repository. Changes to shared skills, installed extensions, or user-wide settings require explicit approval of their global scope.
 
+Create, modify, move, or delete files and directories only under the project root or the system temporary directory. Obtain explicit approval for the specific external location before making changes elsewhere. This applies to direct file operations, commands, subagents, and artifact/output paths; existing directories and past use do not grant approval.
+
 ## Development setup
 
 For a new or unconfigured checkout, follow [Development setup](README.md#development-setup). Stop if required setup fails.

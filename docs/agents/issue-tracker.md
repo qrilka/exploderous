@@ -36,8 +36,8 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 ## Exploration files
 
-- Put temporary experiment helpers in a session scratch directory, such as one under `/tmp`, and maintained automation in the repository.
-- Retain evidence at its documented artifact location. Preserve a helper with it when needed for reproduction; this does not make the helper supported tooling.
+- Put temporary helpers and review artifacts in a session scratch directory under the system temporary directory; keep maintained automation in the repository.
+- Retain evidence at its documented artifact location, subject to the [project filesystem boundary](../../AGENTS.md#project-scope). Preserve a helper with it when needed for reproduction; this does not make the helper supported tooling.
 
 ## Conventions
 
