@@ -14,13 +14,16 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Prepare reports and install pinned mutation tools
+      - name: Prepare reports
+        run: echo "MUTATION_REPORTS=$RUNNER_TEMP/core-mutation-reports" >> "$GITHUB_ENV"
+      - name: Install pinned mutation tools
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         timeout-minutes: 15
-        run: |
-          echo "MUTATION_REPORTS=$RUNNER_TEMP/core-mutation-reports" >> "$GITHUB_ENV"
-          cargo install cargo-mutants --version 27.1.0 --locked --root "$RUNNER_TEMP/mutation-tools"
-          cargo install ast-grep --version 0.51.0 --locked --root "$RUNNER_TEMP/mutation-tools"
-          echo "$RUNNER_TEMP/mutation-tools/bin" >> "$GITHUB_PATH"
+        with:
+          tool: |
+            cargo-mutants@27.1.0
+            ast-grep@0.51.0
+          fallback: cargo-binstall
       - name: Run shared mutation command
         timeout-minutes: 12
         run: python3 scripts/run_mutation_tests.py --output "$MUTATION_REPORTS"

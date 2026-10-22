@@ -17,10 +17,11 @@ jobs:
       - name: Pre-commit hook tests
         run: python3 scripts/test_pre_commit.py
       - name: Install pinned ast-grep for mutation runner checks
+        uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         timeout-minutes: 15
-        run: |
-          cargo install ast-grep --version 0.51.0 --locked --root "$RUNNER_TEMP/ast-grep"
-          echo "$RUNNER_TEMP/ast-grep/bin" >> "$GITHUB_PATH"
+        with:
+          tool: ast-grep@0.51.0
+          fallback: cargo-binstall
       - name: Mutation runner checks (no mutation scan)
         run: python3 scripts/test_mutation_runner.py
       - name: Formatting
