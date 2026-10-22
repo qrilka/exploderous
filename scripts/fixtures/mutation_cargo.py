@@ -4,10 +4,28 @@
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
 import time
+
+
+def mutation(marker, operator, replacement, function="random_choice", file="crates/core/src/game.rs",
+             source_file="crates/core/src/game.rs"):
+    source = Path(source_file).read_text()
+    tag = f"/* {marker} */"
+    offset = source.index(operator, source.index(tag) + len(tag))
+    prefix = source[:offset]
+    line, column = prefix.count("\n") + 1, len(prefix.rsplit("\n", 1)[-1]) + 1
+    return {
+        "name": f"{file}:{line}:{column}: replace {operator} with {replacement} in {function}",
+        "file": file, "replacement": replacement, "genre": "BinaryOperator",
+        "function": {"function_name": function}, "package": "exploderous-core",
+        "span": {"start": {"line": line, "column": column},
+                 "end": {"line": line, "column": column + len(operator)}},
+        "diff": "fixture diff", "fixture_id": f"{marker}:{replacement}",
+    }
 
 
 def main():
@@ -29,12 +47,64 @@ def main():
     for flag in ["--package=exploderous-core", "--test-package=exploderous-core",
                  "--cargo-arg=--locked", "--cargo-arg=--all-targets", "--no-config"]:
         assert flag in args, args
-    assert not any(a.startswith(("--exclude", "--file", "--in-place", "--workspace")) for a in args)
-    names = [f"crates/core/src/lib.rs:{i}:1: replace == with !=" for i in range(1, 5)]
-    inventory = [{"name": name, "diff": "fixture diff", "package": "exploderous-core"} for name in names]
+    assert not any(a.startswith(("--exclude=", "--file", "--in-place", "--workspace")) for a in args)
+    inventory = [{"name": f"crates/core/src/lib.rs:{i}:1: replace == with !=",
+                  "diff": "fixture diff", "package": "exploderous-core"} for i in range(1, 5)]
+    rng = [
+        mutation("threshold", "%", "/"), mutation("shift30", ">>", "<<"),
+        mutation("xor27", "^", "|"), mutation("xor27", "^", "&"),
+        mutation("shift27", ">>", "<<"), mutation("shift31", ">>", "<<"),
+        mutation("acceptance", ">=", "<"),
+    ]
+    equivalent = [
+        mutation("boundary-first", "+", "-", "Motion::boundary_times"),
+        mutation("boundary-first", "+", "*", "Motion::boundary_times"),
+        mutation("boundary-remainder", "%", "/", "Motion::boundary_times"),
+        mutation("boundary-remainder", "%", "+", "Motion::boundary_times"),
+        mutation("boundary-edge", "==", "!=", "Motion::boundary_times"),
+        mutation("dedup-left", "*", "+", "Motion::contacts"),
+        mutation("dedup-left", "*", "/", "Motion::contacts"),
+        mutation("dedup-right", "*", "/", "Motion::contacts"),
+    ]
+    blast_file = "crates/core/src/game/simulation.rs"
+    equivalent += [mutation("ray-limit", "-", replacement, "Game::blast_coverage",
+                            blast_file, blast_file) for replacement in ("+", "/")]
+    policy = rng + equivalent
+    inventory += policy
+    if mode == "policy_exclusions":
+        inventory += [
+            mutation("return-mod", "%", "/"), mutation("threshold", "%", "*"),
+            mutation("other-fn", "%", "/", "other_random_choice"),
+            mutation("similar-fn", "%", "/", "random_choice_extra"),
+            mutation("threshold", "%", "/", file="crates/core/src/other.rs"),
+            mutation("xor30", "^", "|"),
+        ]
+        inventory[-2]["fixture_id"] = "other-file:/"
+        inventory += [
+            mutation("sort-left", "*", "+", "Motion::contacts"),
+            mutation("sort-right", "*", "/", "Motion::contacts"),
+            mutation("midpoint-left", "*", "+", "Motion::contacts"),
+            mutation("midpoint-right", "*", "/", "Motion::contacts"),
+            mutation("dedup-right", "*", "+", "Motion::contacts"),
+            mutation("boundary-remainder", "%", "*", "Motion::boundary_times"),
+            mutation("other-boundary", "+", "*", "Motion::boundary_times_extra"),
+            mutation("other-dedup", "*", "/", "Motion::contacts_extra"),
+            mutation("other-limit", "-", "+", "Game::blast_coverage", blast_file, blast_file),
+            mutation("other-ray", "-", "+", "Game::blast_coverage_extra", blast_file, blast_file),
+            mutation("dedup-left", "*", "/", "Motion::contacts", file=blast_file),
+        ]
+        inventory[-1]["fixture_id"] = "other-contact-file:/"
+    if mode == "missing_equivalent":
+        inventory = [m for m in inventory if m.get("fixture_id") != "ray-limit:/"]
+    if mode == "empty":
+        inventory = policy
+    patterns = [args[i + 1] for i, arg in enumerate(args) if arg == "--exclude-re"]
+    if "--list" not in args and mode != "ignored_exclusions":
+        inventory = [m for m in inventory if not any(re.search(p, m["name"]) for p in patterns)]
+    names = [m["name"] for m in inventory]
     if "--list" in args:
-        assert "--json" in args and "--diff" in args
-        print(json.dumps([] if mode == "empty" else inventory))
+        assert "--json" in args and "--diff" in args and not patterns
+        print(json.dumps(inventory))
         return 0
     assert "--shuffle" in args and "--baseline=run" in args
     assert f"--jobs={os.environ.get('EXPECT_JOBS', '2')}" in args
@@ -42,6 +112,8 @@ def main():
     (out / "log").mkdir(parents=True)
     (out / "diff").mkdir()
     (out / "mutants.json").write_text(json.dumps(list(reversed(inventory))))
+    if mode == "excluded_outcome":
+        names.append(rng[0]["name"])
     (out / "log/baseline.log").write_text("\n*** baseline\n\n*** result: Success\n")
     rows = [{"scenario": "Baseline", "summary": "Success", "log_path": "log/baseline.log",
              "diff_path": None, "phase_results": []}]
@@ -66,7 +138,9 @@ def main():
         time.sleep(60)
     if mode == "tool_error":
         return 70
-    statuses = ["CaughtMutant", "MissedMutant", "Unviable", "Timeout"] if mode == "mixed" else ["CaughtMutant"] * 4
+    statuses = ["CaughtMutant"] * len(names)
+    if mode == "mixed":
+        statuses[:4] = ["CaughtMutant", "MissedMutant", "Unviable", "Timeout"]
     if mode == "survivor":
         statuses[1] = "MissedMutant"
     if mode == "timeout_outcome":
@@ -78,7 +152,7 @@ def main():
         rows.append({"scenario": {"Mutant": {"name": name}}, "summary": status,
                      "log_path": log, "diff_path": diff, "phase_results": []})
     (out / "outcomes.json").write_text(json.dumps({"outcomes": rows, "end_time": "2026-01-01T00:00:00Z",
-        "total_mutants": 4, "caught": statuses.count("CaughtMutant"), "missed": statuses.count("MissedMutant"),
+        "total_mutants": len(names), "caught": statuses.count("CaughtMutant"), "missed": statuses.count("MissedMutant"),
         "unviable": statuses.count("Unviable"), "timeout": statuses.count("Timeout"),
         "cargo_mutants_version": "27.1.0"}))
     if mode == "missing_diff":
