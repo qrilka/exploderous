@@ -14,19 +14,14 @@ jobs:
           persist-credentials: false
       - name: Enable repository hooks
         run: git config --local core.hooksPath .githooks
-      - name: Pre-commit hook tests
-        run: python3 scripts/test_pre_commit.py
-      - name: Install pinned ast-grep for mutation runner checks
+      - name: Install pinned quality-check tools
         uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         timeout-minutes: 15
         with:
-          tool: ast-grep@0.51.0
+          tool: |
+            just@1.51.0
+            cargo-machete@0.9.2
+            ast-grep@0.51.0
           fallback: cargo-binstall
-      - name: Mutation runner checks (no mutation scan)
-        run: python3 scripts/test_mutation_runner.py
-      - name: Formatting
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
-      - name: Tests
-        run: cargo test --all-targets --locked
+      - name: Complete standard quality check (no mutation scan)
+        run: just check

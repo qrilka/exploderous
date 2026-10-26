@@ -9,7 +9,15 @@ An original Bomberman-inspired game in Rust, with correctness as a first-class g
 Requirements:
 
 - [rustup](https://rustup.rs/) to manage the Rust toolchain.
-- Python 3 for the pre-commit hook and its regression tests.
+- Python 3 for repository automation tests.
+- [just](https://just.systems/) 1.51.0, [cargo-machete](https://github.com/bnjbvr/cargo-machete) 0.9.2, and [ast-grep](https://ast-grep.github.io/) 0.51.0 for the complete quality check. Install the same versions pinned in CI:
+
+  ```sh
+  cargo install --locked just --version 1.51.0
+  cargo install --locked cargo-machete --version 0.9.2
+  cargo install --locked ast-grep --version 0.51.0
+  ```
+
 - Repository-local hooks enabled with `git config --local core.hooksPath .githooks`.
 
 ### Run and validate
@@ -18,14 +26,14 @@ Cargo commands automatically provision the Rust version, `rustfmt`, and `clippy`
 
 ```sh
 cargo run -p exploderous-tui --locked
-cargo fmt --all -- --check
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --all-targets --locked
+just check
 ```
 
 The root is a virtual workspace. The playable level for Normal mode is `crates/tui` (package `exploderous-tui`) and requires a terminal with Kitty keyboard-protocol support, at least 19 columns × 17 rows. Arrow keys move, Space places a Bomb, R generates a fresh run, and Q/Escape quits; `h` opens paused help. Defeat the three wandering `e` Buroru with Blasts, reveal the covered Exit with a Bomb, and reach its Cell alive to win. A revealed Exit shows `▧` while enemies survive and `⬚` when ready. Reveal `◈` Fire-up under another Block, wait for the Blast to expire, then collect it to increase subsequent Bombs' reach from one Cell to two; the status row shows current blast reach. Ticking Bombs keep their original reach, and later Blasts can destroy exposed Fire-up. The upgrade is optional for victory. Entering a live Blast Cell or sharing a centre Cell with a Buroru ends the run in Game Over; either outcome freezes play until restart or quit. Each run overwrites `app.log` with terminal events, per-tick movement/placement inputs and positions, and catch-up/error records; pasted contents are redacted. The headless simulation lives in `crates/core` (package `exploderous-core`); root-level check commands cover all workspace members.
 
-CI runs hook tests, formatting, Clippy (warnings fail), and Rust tests on pushes and pull requests.
+`just check` runs unused-dependency detection, formatting, Clippy (warnings fail), hook regression tests, mutation-runner regression tests (no mutation scan), and Rust tests across the workspace. It stops at the first failure and also works from workspace subdirectories. CI runs the same command on pushes and pull requests. The extra quality-check tools are not needed to play the game.
+
+Following [Dev Quality Gates](https://github.com/mokevnin/dev-quality-gates), this project keeps the official rustfmt/Clippy gates and adds cargo-machete to detect unused dependencies. Machete uses source-text matching, so macro-generated usage can produce false positives; investigate findings before adding a narrowly justified `package.metadata.cargo-machete.ignored` exception. No exceptions are currently needed.
 
 ### Mutation testing
 
