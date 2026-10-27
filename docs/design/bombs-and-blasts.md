@@ -95,4 +95,3 @@ Example coexistence:
 | Two blasts sharing a floor cell | Separate coverage/lifetime records |
 
 Additional power-up kinds, multiple-Item sharing policies, and simultaneous collection by multiple eligible bombers remain open. They are not silently chosen by the container layout; the generated level has one eligible collector and one Fire-up.
-

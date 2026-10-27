@@ -287,6 +287,42 @@ fn help_pauses_movement_and_ignores_reset_and_quit_until_closed() {
 }
 
 #[test]
+fn overlapping_pause_causes_resume_only_after_all_clear_without_old_input_or_backlog() {
+    let start = Instant::now();
+    let mut app = support::app(start, 19, 17);
+    app.handle_key(press(KeyCode::Right), start);
+    app.handle_key(press(KeyCode::Char(' ')), start);
+    app.handle_key(press(KeyCode::Char('h')), start);
+    app.set_focused(false, start);
+    app.set_terminal_size(18, 17, start);
+    let paused = app.game().clone();
+    let resumed = start + TICK_INTERVAL * 1000;
+
+    // Closing help must not override lost focus or insufficient terminal size.
+    app.handle_key(press(KeyCode::Esc), resumed);
+    assert!(!app.help_open());
+    assert_eq!(app.next_tick(), None);
+    assert!(app.advance(resumed).unwrap().ticks.is_empty());
+    app.set_focused(true, resumed);
+    app.handle_key(press(KeyCode::Right), resumed);
+    app.handle_key(press(KeyCode::Char(' ')), resumed);
+    assert_eq!(app.next_tick(), None);
+    assert!(app.advance(resumed).unwrap().ticks.is_empty());
+    assert_eq!(app.game(), &paused);
+
+    app.set_terminal_size(19, 17, resumed);
+    assert_eq!(app.next_tick(), Some(resumed + TICK_INTERVAL));
+    assert!(app.advance(resumed).unwrap().ticks.is_empty());
+    let report = app.advance(resumed + TICK_INTERVAL).unwrap();
+    assert_eq!(report.discarded_ticks, 0);
+    assert_eq!(report.ticks.len(), 1);
+    assert_eq!(report.ticks[0].direction, None);
+    assert!(!report.ticks[0].place_bomb);
+    assert_eq!(app.game().character().position, point(128, 128));
+    assert!(app.game().bomb().is_none());
+}
+
+#[test]
 fn focus_pause_clears_input_and_resumes_idle() {
     let start = Instant::now();
     let mut app = support::app(start, 19, 17);

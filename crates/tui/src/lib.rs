@@ -75,18 +75,25 @@ pub struct AdvanceReport {
     pub discarded_ticks: u128,
 }
 
+enum PlayClock {
+    Paused,
+    Running {
+        next_tick: Instant,
+        held: Vec<Direction>,
+        placement_pending: bool,
+    },
+}
+
 pub struct App {
     game: Game,
     generation_state: u64,
-    held: Vec<Direction>,
-    placement_pending: bool,
+    clock: PlayClock,
     focused: bool,
     width: u16,
     height: u16,
     help_open: bool,
     help_scroll: usize,
     quit: bool,
-    next_tick: Option<Instant>,
 }
 
 impl App {
@@ -124,15 +131,13 @@ impl App {
         let mut app = Self {
             game: Game::new(scenario, Tick::ZERO),
             generation_state,
-            held: Vec::new(),
-            placement_pending: false,
+            clock: PlayClock::Paused,
             focused: true,
             width,
             height,
             help_open: false,
             help_scroll: 0,
             quit: false,
-            next_tick: None,
         };
         app.reconcile_clock(now);
         app
@@ -174,23 +179,30 @@ impl App {
                 self.quit = true;
                 self.reconcile_clock(now);
             }
-            (KeyCode::Char(' '), KeyEventKind::Press) if !self.paused() => {
-                self.placement_pending = true;
+            (KeyCode::Char(' '), KeyEventKind::Press) => {
+                if let PlayClock::Running {
+                    placement_pending, ..
+                } = &mut self.clock
+                {
+                    *placement_pending = true;
+                }
             }
             (KeyCode::Char('r' | 'R'), KeyEventKind::Press) => self.reset(now),
             (KeyCode::Char('?'), KeyEventKind::Press)
             | (KeyCode::Char('h' | 'H'), KeyEventKind::Press) => self.toggle_help(now),
             (code, KeyEventKind::Press) => {
                 if let Some(direction) = direction(code)
-                    && self.can_move()
+                    && let PlayClock::Running { held, .. } = &mut self.clock
                 {
-                    self.held.retain(|held| *held != direction);
-                    self.held.push(direction);
+                    held.retain(|held| *held != direction);
+                    held.push(direction);
                 }
             }
             (code, KeyEventKind::Release) => {
-                if let Some(direction) = direction(code) {
-                    self.held.retain(|held| *held != direction);
+                if let Some(direction) = direction(code)
+                    && let PlayClock::Running { held, .. } = &mut self.clock
+                {
+                    held.retain(|held| *held != direction);
                 }
             }
             _ => {}
@@ -211,7 +223,7 @@ impl App {
 
     pub fn advance(&mut self, now: Instant) -> Result<AdvanceReport, StepError> {
         self.reconcile_clock(now);
-        let Some(deadline) = self.next_tick else {
+        let Some(deadline) = self.next_tick() else {
             return Ok(AdvanceReport {
                 ticks: Vec::new(),
                 discarded_ticks: 0,
@@ -230,14 +242,20 @@ impl App {
         let direction = self.held_direction();
         let mut ticks = Vec::with_capacity(tick_count);
         for _ in 0..tick_count {
-            let place_bomb = self.placement_pending;
+            let PlayClock::Running {
+                placement_pending, ..
+            } = &mut self.clock
+            else {
+                break;
+            };
+            let place_bomb = *placement_pending;
             let command = CharacterCommand {
                 character: self.game.character().id,
                 movement: direction,
                 place_bomb,
             };
             self.game.step(&[command])?;
-            self.placement_pending = false;
+            *placement_pending = false;
             ticks.push(TickRecord {
                 tick: self.game.tick(),
                 direction,
@@ -250,10 +268,10 @@ impl App {
             }
         }
 
-        if !self.paused() {
+        if let PlayClock::Running { next_tick, .. } = &mut self.clock {
             let remainder = elapsed.as_nanos() % TICK_INTERVAL.as_nanos();
             let until_next = TICK_INTERVAL.as_nanos() - remainder;
-            self.next_tick = Some(now + Duration::from_nanos(until_next as u64));
+            *next_tick = now + Duration::from_nanos(until_next as u64);
         }
         Ok(AdvanceReport {
             discarded_ticks: overdue - ticks.len() as u128,
@@ -266,7 +284,10 @@ impl App {
     }
 
     pub fn held_direction(&self) -> Option<Direction> {
-        self.held.last().copied()
+        match &self.clock {
+            PlayClock::Paused => None,
+            PlayClock::Running { held, .. } => held.last().copied(),
+        }
     }
 
     pub fn help_open(&self) -> bool {
@@ -282,7 +303,10 @@ impl App {
     }
 
     pub fn next_tick(&self) -> Option<Instant> {
-        self.next_tick
+        match &self.clock {
+            PlayClock::Paused => None,
+            PlayClock::Running { next_tick, .. } => Some(*next_tick),
+        }
     }
 
     fn minimum_size(&self) -> (u16, u16) {
@@ -303,11 +327,13 @@ impl App {
 
     fn reconcile_clock(&mut self, now: Instant) {
         if self.paused() {
-            self.next_tick = None;
-            self.held.clear();
-            self.placement_pending = false;
-        } else if self.next_tick.is_none() {
-            self.next_tick = Some(now + TICK_INTERVAL);
+            self.clock = PlayClock::Paused;
+        } else if matches!(self.clock, PlayClock::Paused) {
+            self.clock = PlayClock::Running {
+                next_tick: now + TICK_INTERVAL,
+                held: Vec::new(),
+                placement_pending: false,
+            };
         }
     }
 
@@ -321,20 +347,16 @@ impl App {
             Self::generate_scenario(*self.game.rules(), &mut self.generation_state),
             Tick::ZERO,
         );
-        self.held.clear();
-        self.placement_pending = false;
-        self.next_tick = None;
+        self.clock = PlayClock::Paused;
         self.reconcile_clock(now);
     }
 
     fn toggle_help(&mut self, now: Instant) {
         self.help_open = !self.help_open;
-        self.held.clear();
-        self.placement_pending = false;
         if self.help_open {
             self.help_scroll = 0;
         }
-        self.next_tick = None;
+        self.clock = PlayClock::Paused;
         self.reconcile_clock(now);
     }
 
