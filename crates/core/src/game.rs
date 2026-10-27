@@ -1,6 +1,6 @@
 //! Deterministic movement, Bomb/Blast simulation, and validated game state.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, num::NonZeroUsize};
 
 mod rules;
 mod scenario;
@@ -593,7 +593,8 @@ pub enum Outcome {
 }
 
 // SplitMix64: the entire generator state is one word. Rejection avoids modulo bias.
-fn random_choice(state: &mut u64, count: u64) -> usize {
+fn random_choice(state: &mut u64, count: NonZeroUsize) -> usize {
+    let count = count.get() as u64;
     if count == 1 {
         return 0;
     }

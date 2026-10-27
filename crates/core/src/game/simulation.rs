@@ -246,11 +246,11 @@ impl Game {
                     == start.advanced(direction, WORLD_UNITS_PER_CELL as u32)
             })
             .collect();
-            if legal.is_empty() {
+            let Some(legal_count) = NonZeroUsize::new(legal.len()) else {
                 return start;
-            }
+            };
             *heading = Some(match *heading {
-                None => legal[random_choice(random_state, legal.len() as u64)],
+                None => legal[random_choice(random_state, legal_count)],
                 Some(forward) => {
                     let perpendicular = match forward {
                         Direction::Up | Direction::Down => [Direction::Right, Direction::Left],
@@ -260,9 +260,12 @@ impl Game {
                         .into_iter()
                         .filter(|direction| legal.contains(direction))
                         .collect();
+                    let side_count = NonZeroUsize::new(sides.len());
                     if legal.contains(&forward) {
-                        if !sides.is_empty() && random_choice(random_state, 10) == 0 {
-                            sides[random_choice(random_state, sides.len() as u64)]
+                        if let Some(count) = side_count
+                            && random_choice(random_state, NonZeroUsize::new(10).unwrap()) == 0
+                        {
+                            sides[random_choice(random_state, count)]
                         } else {
                             forward
                         }
@@ -274,11 +277,15 @@ impl Game {
                             Direction::Left => Direction::Right,
                         };
                         if legal.contains(&reverse)
-                            && (sides.is_empty() || random_choice(random_state, 4) != 0)
+                            && (side_count.is_none()
+                                || random_choice(random_state, NonZeroUsize::new(4).unwrap()) != 0)
                         {
                             reverse
                         } else {
-                            sides[random_choice(random_state, sides.len() as u64)]
+                            sides[random_choice(
+                                random_state,
+                                side_count.expect("legal side category is nonempty"),
+                            )]
                         }
                     }
                 }

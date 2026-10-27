@@ -53,7 +53,9 @@ impl Scenario {
             .collect();
         let mut enemies = Vec::new();
         for id in 1..=3 {
-            let index = random_choice(&mut state, candidates.len() as u64);
+            let count =
+                NonZeroUsize::new(candidates.len()).expect("generated Arena has enemy candidates");
+            let index = random_choice(&mut state, count);
             let cell = candidates.remove(index);
             let neighbors: Vec<_> = [
                 Direction::Up,
@@ -66,7 +68,9 @@ impl Scenario {
             .filter(|&cell| arena.terrain_at(cell) == Some(Terrain::Floor))
             .collect();
             reserved.push(cell);
-            reserved.push(neighbors[random_choice(&mut state, neighbors.len() as u64)]);
+            let count =
+                NonZeroUsize::new(neighbors.len()).expect("non-pillar candidate has a neighbor");
+            reserved.push(neighbors[random_choice(&mut state, count)]);
             enemies.push(BuroruStart {
                 id: CharacterId::new(id),
                 cell,
@@ -76,14 +80,19 @@ impl Scenario {
             .into_iter()
             .filter(|cell| !reserved.contains(cell))
             .collect();
-        let exit_index = random_choice(&mut state, eligible.len() as u64);
+        let count = NonZeroUsize::new(eligible.len()).expect("generated Arena has room for Exit");
+        let exit_index = random_choice(&mut state, count);
         let exit = eligible.remove(exit_index);
-        let item_index = random_choice(&mut state, eligible.len() as u64);
+        let count =
+            NonZeroUsize::new(eligible.len()).expect("generated Arena has room for Fire-up");
+        let item_index = random_choice(&mut state, count);
         let item = eligible.remove(item_index);
         arena.set_terrain(exit, Terrain::Block);
         arena.set_terrain(item, Terrain::Block);
         for cell in eligible {
-            if random_choice(&mut state, 100) < usize::from(block_percent) {
+            if random_choice(&mut state, NonZeroUsize::new(100).unwrap())
+                < usize::from(block_percent)
+            {
                 arena.set_terrain(cell, Terrain::Block);
             }
         }
