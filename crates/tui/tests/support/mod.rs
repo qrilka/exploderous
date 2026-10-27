@@ -107,7 +107,7 @@ pub fn prepare_ready_exit(app: &mut App, now: &mut Instant) {
     travel(app, now, KeyCode::Left, 2);
     travel(app, now, KeyCode::Down, 1);
     ticks(app, now, 3); // detonation and expiry
-    assert!(app.game().enemies().is_empty());
+    assert!(app.game().enemies().next().is_none());
     assert_eq!(app.game().outcome(), None);
     travel(app, now, KeyCode::Up, 1);
     travel(app, now, KeyCode::Left, 2);

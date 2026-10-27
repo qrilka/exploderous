@@ -199,7 +199,7 @@ fn generation_progresses_separately_from_game_clones_and_replays() {
         assert_eq!(Game::new(scenario.clone(), 0), Game::new(scenario, 0));
         let before = game.clone();
         let npc = CharacterCommand {
-            character: game.enemies()[0].id,
+            character: game.enemies().next().unwrap().id,
             movement: None,
             place_bomb: false,
         };

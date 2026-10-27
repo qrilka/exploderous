@@ -172,10 +172,7 @@ fn one_hit_kills_preserve_unrelated_identities_and_clone_independence() {
     let mut sibling = game.clone();
     game.step(&[action(Some(Left), false)]).unwrap();
     assert_eq!(
-        game.enemies()
-            .iter()
-            .map(|enemy| enemy.id)
-            .collect::<Vec<_>>(),
+        game.enemies().map(|enemy| enemy.id).collect::<Vec<_>>(),
         vec![CharacterId::new(99)]
     );
     assert_eq!(game.fire_up(), Some(cell(4, 2))); // Buroru cannot collect an exposed Item.
@@ -189,10 +186,7 @@ fn one_hit_kills_preserve_unrelated_identities_and_clone_independence() {
     }
     assert!(game.blasts().is_empty());
     assert_eq!(
-        game.enemies()
-            .iter()
-            .map(|enemy| enemy.id)
-            .collect::<Vec<_>>(),
+        game.enemies().map(|enemy| enemy.id).collect::<Vec<_>>(),
         vec![CharacterId::new(99)]
     );
     assert_eq!(Game::new(initial, 0).enemies().len(), 3);
@@ -224,7 +218,7 @@ fn last_kill_wins_on_an_uncovered_exit_without_reentry_but_harm_takes_precedence
         game.step(&[]).unwrap(); // Stationary on the Exit as the last enemy dies.
         sibling.step(&[]).unwrap();
         assert_eq!(game, sibling);
-        assert!(game.enemies().is_empty());
+        assert!(game.enemies().next().is_none());
         assert_eq!(game.outcome(), outcome);
         if outcome.is_some() {
             let frozen = game.clone();
@@ -250,7 +244,7 @@ fn contact_cannot_be_undone_by_killing_the_last_enemy_later_in_the_tick() {
     game.step(&[action(None, true)]).unwrap();
     game.step(&[action(Some(Right), false)]).unwrap();
     assert_eq!(game.character().position, point(1152, 384));
-    assert!(game.enemies().is_empty());
+    assert!(game.enemies().next().is_none());
     assert!(game.exit_ready());
     assert_eq!(game.outcome(), Some(Outcome::Defeat));
 }
@@ -276,15 +270,15 @@ fn new_blast_hits_use_moving_enemy_centres_not_overlapping_footprints() {
             game.step(&[]).unwrap();
         }
         assert_eq!(game.outcome(), None);
-        assert_eq!(game.enemies().is_empty(), dies);
+        assert_eq!(game.enemies().next().is_none(), dies);
         if !dies {
-            assert_eq!(game.enemies()[0].position, point(248, 384));
+            assert_eq!(game.enemies().next().unwrap().position, point(248, 384));
             // Expiry precedes movement; a still-live effect instead kills at entry.
             game.step(&[]).unwrap();
             if lifetime == 1 {
-                assert_eq!(game.enemies()[0].position, point(256, 384));
+                assert_eq!(game.enemies().next().unwrap().position, point(256, 384));
             } else {
-                assert!(game.enemies().is_empty());
+                assert!(game.enemies().next().is_none());
             }
         }
     }
@@ -319,12 +313,7 @@ fn bomb_passage_is_per_character_and_belongs_only_to_the_current_bomb() {
         assert_eq!(game, sibling);
     }
     assert!(game.bomb().is_none());
-    assert!(
-        !game
-            .enemies()
-            .iter()
-            .any(|enemy| enemy.id == CharacterId::new(7))
-    );
+    assert!(!game.enemies().any(|enemy| enemy.id == CharacterId::new(7)));
     game.step(&[action(None, true)]).unwrap();
     let replacement = game.bomb().unwrap();
     assert!(replacement.escape_allowed_for(CharacterId::new(0)));
@@ -369,7 +358,7 @@ fn scenario_validation_owns_identity_cells_and_canonical_enemy_footprints() {
         .with_enemies(vec![enemy(u32::MAX, point(128, 384))])
         .unwrap();
     assert_eq!(
-        Game::new(legal, 0).enemies()[0].id,
+        Game::new(legal, 0).enemies().next().unwrap().id,
         CharacterId::new(u32::MAX)
     );
 }
@@ -418,7 +407,7 @@ fn wandering_enemies_lock_the_exit_and_can_initially_share_cells() {
     .with_exit(cell(0, 0))
     .unwrap();
     let mut game = Game::new(scenario, 0);
-    let enemies = game.enemies().to_vec();
+    let enemies = game.enemies().copied().collect::<Vec<_>>();
     assert!(!game.exit_ready());
     for _ in 0..10 {
         game.step(&[]).unwrap();
@@ -426,11 +415,10 @@ fn wandering_enemies_lock_the_exit_and_can_initially_share_cells() {
     assert_eq!(game.enemies().len(), 2);
     assert!(
         game.enemies()
-            .iter()
             .zip(&enemies)
             .all(|(after, before)| after.id == before.id)
     );
-    assert_ne!(game.enemies(), enemies);
+    assert_ne!(game.enemies().copied().collect::<Vec<_>>(), enemies);
     assert_eq!(game.character(), &Character::from(bomber(point(128, 128))));
     assert_eq!(game.outcome(), None);
     assert_eq!(game.tick(), 10);

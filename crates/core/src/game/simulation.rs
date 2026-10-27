@@ -7,13 +7,15 @@ impl Game {
         Self {
             arena: scenario.arena,
             character: scenario.character,
-            wandering: scenario
-                .enemies
-                .iter()
-                .map(|enemy| (enemy.id, None))
-                .collect(),
             random_state: scenario.random_seed,
-            enemies: scenario.enemies,
+            enemies: scenario
+                .enemies
+                .into_iter()
+                .map(|character| BuroruState {
+                    character,
+                    heading: None,
+                })
+                .collect(),
             tick: initial_tick,
             rules: scenario.rules,
             bomb: None,
@@ -39,7 +41,7 @@ impl Game {
                 && !self
                     .enemies
                     .iter()
-                    .any(|enemy| enemy.id == command.character)
+                    .any(|enemy| enemy.character.id == command.character)
         }) {
             return Err(StepError::UnknownCharacter);
         }
@@ -55,13 +57,10 @@ impl Game {
         let next_tick = self.tick.checked_add(1).ok_or(StepError::TickExhausted)?;
         // Stage policy and RNG with movement: deadline failure must roll back decisions too.
         let mut random_state = self.random_state;
-        let mut wandering = self.wandering.clone();
         let mut enemies = self.enemies.clone();
         for enemy in &mut enemies {
-            let policy = wandering
-                .get_mut(&enemy.id)
-                .expect("living enemy has policy");
-            enemy.position = self.wander(*enemy, policy, &mut random_state);
+            enemy.character.position =
+                self.wander(enemy.character, &mut enemy.heading, &mut random_state);
         }
         let start = self.character.position;
         let [bend, position] = frame
@@ -82,7 +81,11 @@ impl Game {
             }
             .contacts(
                 &Motion {
-                    points: [before.position, before.position, after.position],
+                    points: [
+                        before.character.position,
+                        before.character.position,
+                        after.character.position,
+                    ],
                     speed: BURORU_MOVEMENT_DISTANCE,
                 },
                 &self.arena,
@@ -111,7 +114,7 @@ impl Game {
                     position,
                     ..self.character
                 })
-                .chain(enemies.iter().copied())
+                .chain(enemies.iter().map(|enemy| enemy.character))
                 .filter(|character| {
                     let rules = if character.kind == CharacterKind::Buroru {
                         GameRules::default()
@@ -148,14 +151,13 @@ impl Game {
         };
         // Everything fallible is checked before committing any live-state changes.
         self.enemies = enemies;
-        self.wandering = wandering;
         self.random_state = random_state;
         if let Some(bomb) = &mut bomb {
             bomb.escape_allowed.retain(|id| {
                 *id == self.character.id
                     || self.enemies.iter().any(|enemy| {
-                        enemy.id == *id
-                            && Rect::footprint(enemy.position, GameRules::default())
+                        enemy.character.id == *id
+                            && Rect::footprint(enemy.character.position, GameRules::default())
                                 .overlaps(self.arena.cell_bounds(bomb.cell))
                     })
             });
@@ -187,14 +189,12 @@ impl Game {
         self.enemies.retain(|enemy| {
             let cell = self
                 .arena
-                .cell_containing(enemy.position)
+                .cell_containing(enemy.character.position)
                 .expect("enemy stays in Arena");
             // A survivor starts clear of live Blasts. Its straight, sub-Cell step
             // cannot cross a dangerous Cell with both endpoints safe.
             !self.blasts.iter().any(|blast| blast.cells.contains(&cell))
         });
-        self.wandering
-            .retain(|id, _| self.enemies.iter().any(|enemy| enemy.id == *id));
         if path_harmed
             || self
                 .blasts
@@ -450,8 +450,8 @@ impl Game {
                 .is_some_and(|cell| self.arena.terrain_at(cell) == Some(Terrain::Floor))
     }
 
-    pub fn enemies(&self) -> &[Character] {
-        &self.enemies
+    pub fn enemies(&self) -> impl ExactSizeIterator<Item = &Character> + DoubleEndedIterator {
+        self.enemies.iter().map(|enemy| &enemy.character)
     }
 
     pub fn exit(&self) -> Option<CellCoord> {

@@ -25,7 +25,7 @@ fn open_junctions_prefer_straight_and_only_make_legal_perpendicular_turns() {
             for seed in 0..512 {
                 let mut game = junction(direction, true, side_count, seed);
                 game.step(&[]).unwrap();
-                let movement = delta(point(640, 640), game.enemies()[0].position);
+                let movement = delta(point(640, 640), game.enemies().next().unwrap().position);
                 match movement {
                     m if m == (dx * 8, dy * 8) => straight += 1,
                     m if m == (-dy * 8, dx * 8) => sides[0] += 1,
@@ -36,10 +36,10 @@ fn open_junctions_prefer_straight_and_only_make_legal_perpendicular_turns() {
                 }
                 // No off-centre reselection during the following Cell of travel.
                 for tick in 34..=64 {
-                    let previous = game.enemies()[0].position;
+                    let previous = game.enemies().next().unwrap().position;
                     game.step(&[]).unwrap();
                     assert_eq!(
-                        delta(previous, game.enemies()[0].position),
+                        delta(previous, game.enemies().next().unwrap().position),
                         movement,
                         "seed={seed}, direction={direction:?}, tick={tick}"
                     );
@@ -78,7 +78,7 @@ fn blocked_routes_prefer_reversal_and_split_the_remaining_choices_among_sides() 
             for seed in 0..512 {
                 let mut game = junction(direction, false, side_count, seed);
                 game.step(&[]).unwrap();
-                let movement = delta(point(640, 640), game.enemies()[0].position);
+                let movement = delta(point(640, 640), game.enemies().next().unwrap().position);
                 match movement {
                     m if m == (-dx * 8, -dy * 8) => reversals += 1,
                     m if m == (-dy * 8, dx * 8) => sides[0] += 1,
@@ -116,7 +116,7 @@ fn initial_heading_is_chosen_from_all_legal_cardinal_directions() {
                 .unwrap();
             let mut game = Game::new(initial, 0);
             game.step(&[]).unwrap();
-            let index = match delta(point(640, 640), game.enemies()[0].position) {
+            let index = match delta(point(640, 640), game.enemies().next().unwrap().position) {
                 (8, 0) => 0,
                 (-8, 0) => 1,
                 (0, 8) if legal_count >= 3 => 2,
@@ -148,7 +148,7 @@ fn open_junction_side_turns_are_balanced_conditionally_on_turning() {
     for seed in 0..4096 {
         let mut game = junction(Direction::Right, true, 2, seed);
         game.step(&[]).unwrap();
-        match delta(point(640, 640), game.enemies()[0].position) {
+        match delta(point(640, 640), game.enemies().next().unwrap().position) {
             (8, 0) => {}
             (0, -8) => sides[0] += 1,
             (0, 8) => sides[1] += 1,

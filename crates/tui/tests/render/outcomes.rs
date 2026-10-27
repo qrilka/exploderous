@@ -56,7 +56,6 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
     let enemy_cells: Vec<_> = app
         .game()
         .enemies()
-        .iter()
         .map(|enemy| app.game().arena().cell_containing(enemy.position).unwrap())
         .collect();
     for cell in enemy_cells {

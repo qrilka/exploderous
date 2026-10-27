@@ -33,7 +33,6 @@ fn centered_map_has_thirteen_playable_cells_inside_a_separate_frame() {
             } else if app
                 .game()
                 .enemies()
-                .iter()
                 .any(|enemy| app.game().arena().cell_containing(enemy.position) == Some(cell))
             {
                 "e"

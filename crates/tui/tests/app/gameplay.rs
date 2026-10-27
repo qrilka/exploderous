@@ -29,7 +29,7 @@ fn normal_level_has_thirteen_playable_cells_per_axis_and_a_protected_opening() {
 fn authored_buroru_wander_on_idle_ticks_pause_completely_and_restart_generates() {
     let mut now = Instant::now();
     let mut app = support::app(now, 19, 17);
-    let enemies = app.game().enemies().to_vec();
+    let enemies = app.game().enemies().copied().collect::<Vec<_>>();
     assert_eq!(enemies.len(), 3);
     for (index, enemy) in enemies.iter().enumerate() {
         assert_ne!(enemy.id, app.game().character().id);
@@ -41,7 +41,7 @@ fn authored_buroru_wander_on_idle_ticks_pause_completely_and_restart_generates()
         continuation.step(&[]).unwrap();
     }
     assert_eq!(app.game(), &continuation);
-    assert_ne!(app.game().enemies(), enemies);
+    assert_ne!(app.game().enemies().copied().collect::<Vec<_>>(), enemies);
     app.handle_key(press(KeyCode::Char('h')), now);
     let paused = app.game().clone();
     support::ticks(&mut app, &mut now, 100);

@@ -1,6 +1,6 @@
 //! Deterministic movement, Bomb/Blast simulation, and validated game state.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 mod rules;
 mod scenario;
@@ -601,13 +601,18 @@ fn random_choice(state: &mut u64, count: u64) -> usize {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BuroruState {
+    character: Character,
+    heading: Option<Direction>,
+}
+
 /// Complete simulation state. Equality and cloning include every authoritative field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Game {
     arena: Arena,
     character: Character,
-    enemies: Vec<Character>,
-    wandering: BTreeMap<CharacterId, Option<Direction>>,
+    enemies: Vec<BuroruState>,
     random_state: u64,
     tick: u64,
     rules: GameRules,

@@ -427,7 +427,6 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
         } else if app
             .game
             .enemies()
-            .iter()
             .any(|enemy| arena.cell_containing(enemy.position) == Some(cell))
         {
             'e'

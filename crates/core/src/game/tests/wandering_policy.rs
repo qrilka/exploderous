@@ -25,7 +25,10 @@ fn empty_input_advances_a_persistent_half_speed_centred_run() {
     );
     for tick in 1..=32 {
         game.step(&[]).unwrap();
-        assert_eq!(game.enemies()[0].position, point(128 + tick * 8, 128));
+        assert_eq!(
+            game.enemies().next().unwrap().position,
+            point(128 + tick * 8, 128)
+        );
         assert_eq!(game.character().position, point(128, 640));
         assert_eq!(game.outcome(), None);
     }
@@ -48,7 +51,7 @@ fn a_clear_corridor_keeps_its_heading_beyond_the_old_maximum_run_duration() {
         for tick in 1..=320 {
             game.step(&[]).unwrap();
             assert_eq!(
-                game.enemies()[0].position,
+                game.enemies().next().unwrap().position,
                 point(128 + tick * 8, 128),
                 "seed={seed}, tick={tick}"
             );
@@ -105,7 +108,7 @@ fn junction(direction: Direction, forward_open: bool, side_count: usize, seed: u
     for _ in 0..32 {
         game.step(&[]).unwrap();
     }
-    assert_eq!(game.enemies()[0].position, point(640, 640));
+    assert_eq!(game.enemies().next().unwrap().position, point(640, 640));
     game
 }
 
@@ -136,7 +139,7 @@ fn blocked_forward_and_reverse_leave_only_the_legal_side_category() {
             game.step(&[]).unwrap();
             // The extra player access gives two initial choices. Observe the
             // Right approaches; do not assert a particular seed-to-heading map.
-            if game.enemies()[0].position != point(392, 640) {
+            if game.enemies().next().unwrap().position != point(392, 640) {
                 continue;
             }
             for _ in 2..=30 {
@@ -145,9 +148,9 @@ fn blocked_forward_and_reverse_leave_only_the_legal_side_category() {
             game.step(&[action(Some(Direction::Right), true)]).unwrap();
             assert!(!game.bomb().unwrap().escape_allowed_for(CharacterId::new(7)));
             game.step(&[action(Some(Direction::Left), false)]).unwrap();
-            assert_eq!(game.enemies()[0].position, point(640, 640));
+            assert_eq!(game.enemies().next().unwrap().position, point(640, 640));
             game.step(&[]).unwrap();
-            match game.enemies()[0].position {
+            match game.enemies().next().unwrap().position {
                 position if position == point(640, 632) => sides[0] += 1,
                 position if side_count == 2 && position == point(640, 648) => sides[1] += 1,
                 position => {
@@ -207,11 +210,10 @@ fn forced_travel_reversals_and_trapped_waiting_do_not_spend_other_enemies_random
             together.step(&[]).unwrap();
             let observed = together
                 .enemies()
-                .iter()
                 .find(|enemy| enemy.id == main.id)
                 .unwrap();
             assert_eq!(
-                alone.enemies()[0].position,
+                alone.enemies().next().unwrap().position,
                 observed.position,
                 "seed={seed}, tick={tick}"
             );
@@ -239,8 +241,8 @@ fn obstructions_interrupt_at_centres_trapped_enemies_wait_and_bodies_do_not_bloc
         let mut game = Game::new(initial, 0);
         for tick in 1..=128 {
             game.step(&[]).unwrap();
-            let a = game.enemies()[0].position;
-            let b = game.enemies()[1].position;
+            let a = game.enemies().next().unwrap().position;
+            let b = game.enemies().nth(1).unwrap().position;
             assert!((128..=384).contains(&a.x().value()), "tick={tick}");
             assert!((128..=384).contains(&b.x().value()), "tick={tick}");
             assert_eq!((a.y().value(), b.y().value()), (128, 128));
@@ -250,7 +252,7 @@ fn obstructions_interrupt_at_centres_trapped_enemies_wait_and_bodies_do_not_bloc
             if tick == 33 {
                 assert_eq!(a, point(376, 128));
             }
-            assert_eq!(game.enemies()[2].position, point(1664, 128));
+            assert_eq!(game.enemies().nth(2).unwrap().position, point(1664, 128));
             assert_eq!(game.outcome(), None);
         }
     }
@@ -370,7 +372,7 @@ fn ordinary_wandering_crosses_and_reverses_over_a_new_bomb_until_full_clearance(
                 game.step(&[]).unwrap();
             }
             game.step(&[action(None, true)]).unwrap();
-            assert_eq!(game.enemies()[0].position, point(200, 128));
+            assert_eq!(game.enemies().next().unwrap().position, point(200, 128));
             assert!(game.bomb().unwrap().escape_allowed_for(CharacterId::new(7)));
             for direction in [
                 Direction::Down,
@@ -381,7 +383,7 @@ fn ordinary_wandering_crosses_and_reverses_over_a_new_bomb_until_full_clearance(
             ] {
                 game.step(&[action(Some(direction), false)]).unwrap();
             }
-            let mut previous = game.enemies()[0].position;
+            let mut previous = game.enemies().next().unwrap().position;
             let mut cleared = false;
             let mut sibling = game.clone();
             for tick in 15..=150 {
@@ -391,7 +393,7 @@ fn ordinary_wandering_crosses_and_reverses_over_a_new_bomb_until_full_clearance(
                     game, sibling,
                     "seed={seed}, open={forward_open}, tick={tick}"
                 );
-                let position = game.enemies()[0].position;
+                let position = game.enemies().next().unwrap().position;
                 let (x, y) = (position.x().value(), position.y().value());
                 let overlaps = x > 160 && x < 608 && y < 352;
                 let permission = game.bomb().unwrap().escape_allowed_for(CharacterId::new(7));
@@ -443,12 +445,12 @@ fn a_bomb_appearing_ahead_stops_an_in_flight_route_without_off_centre_turns() {
     for tick in 3..=10 {
         game.step(&[]).unwrap();
         assert_eq!(
-            game.enemies()[0].position,
+            game.enemies().next().unwrap().position,
             point((128 + tick * 8).min(160), 128)
         );
     }
     game.step(&[]).unwrap();
-    assert!(game.enemies().is_empty());
+    assert!(game.enemies().next().is_none());
     assert_eq!(game.outcome(), None);
 }
 
@@ -483,7 +485,7 @@ fn clones_cross_random_decisions_after_one_moving_enemy_is_removed() {
         assert_eq!(game, sibling);
     }
     assert_eq!(game.enemies().len(), 1);
-    assert_eq!(game.enemies()[0].id, CharacterId::new(99));
+    assert_eq!(game.enemies().next().unwrap().id, CharacterId::new(99));
     for tick in 0..300 {
         game.step(&[]).unwrap();
         sibling.step(&[]).unwrap();
@@ -501,7 +503,7 @@ fn wandering_does_not_consume_fire_up() {
     for _ in 0..32 {
         game.step(&[]).unwrap();
     }
-    assert_eq!(game.enemies()[0].position, point(384, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(384, 128));
     assert_eq!(game.fire_up(), Some(cell(1, 0)));
     assert_eq!(game.current_blast_reach(), 1);
     assert!(game.bomb().is_none());

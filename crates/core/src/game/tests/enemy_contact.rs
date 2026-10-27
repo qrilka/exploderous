@@ -22,9 +22,9 @@ fn moving_contact_requires_simultaneous_cells_not_the_union_of_visited_cells() {
     for _ in 0..15 {
         game.step(&[]).unwrap();
     }
-    assert_eq!(game.enemies()[0].position, point(248, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(248, 128));
     game.step(&[action(Some(Direction::Right), false)]).unwrap();
-    assert_eq!(game.enemies()[0].position, point(256, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(256, 128));
     assert_eq!(game.outcome(), None);
 
     // With no player movement that same enemy entry is lethal at the exact boundary.
@@ -73,13 +73,13 @@ fn passing_a_buroru_between_tick_endpoints_causes_defeat() {
         game.step(&[]).unwrap();
     }
     assert_eq!(game.character().position, point(511, 128));
-    assert_eq!(game.enemies()[0].position, point(512, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(512, 128));
     assert_eq!(game.outcome(), None);
 
     game.step(&[action(Some(Direction::Right), false)]).unwrap();
     // Their endpoint Cells differ, but both centres occupy Cell 1 for 0 < t < 1/16.
     assert_eq!(game.character().position, point(527, 128));
-    assert_eq!(game.enemies()[0].position, point(504, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(504, 128));
     assert_eq!(game.outcome(), Some(Outcome::Defeat));
 }
 
@@ -130,14 +130,14 @@ fn late_contact_between_boundary_instants_causes_defeat() {
         game.step(&[]).unwrap();
     }
     assert_eq!(game.character().position, point(1024, 128));
-    assert_eq!(game.enemies()[0].position, point(248, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(248, 128));
     assert_eq!(game.outcome(), None);
 
     game.step(&[action(Some(Direction::Left), false)]).unwrap();
     // At t=3/4 the player is x=256 (Cell 1); at t=1 the enemy enters
     // Cell 1. Both centres occupy Cell 0 only for 3/4 < t < 1.
     assert_eq!(game.character().position, point(1, 128));
-    assert_eq!(game.enemies()[0].position, point(256, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(256, 128));
     assert_eq!(game.outcome(), Some(Outcome::Defeat));
 }
 
@@ -169,7 +169,8 @@ fn contact_around_an_assisted_bend_uses_only_the_actual_path() {
         assert_eq!(game.character().position, position, "blocked={blocked}");
         // Any initial enemy heading stays in the same Cell for this tick.
         assert_eq!(
-            game.arena().cell_containing(game.enemies()[0].position),
+            game.arena()
+                .cell_containing(game.enemies().next().unwrap().position),
             Some(cell(1, 1)),
             "blocked={blocked}"
         );
@@ -195,13 +196,13 @@ fn early_contact_before_another_cell_crossing_causes_defeat() {
         game.step(&[]).unwrap();
     }
     assert_eq!(game.character().position, point(320, 128));
-    assert_eq!(game.enemies()[0].position, point(512, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(512, 128));
     assert_eq!(game.outcome(), None);
 
     game.step(&[action(Some(Direction::Right), false)]).unwrap();
     // Both centres occupy Cell 1 only for 0 < t < 3/8. The player then
     // enters Cell 2 at t=3/8 and Cell 3 at t=7/8; later travel cannot undo harm.
     assert_eq!(game.character().position, point(832, 128));
-    assert_eq!(game.enemies()[0].position, point(504, 128));
+    assert_eq!(game.enemies().next().unwrap().position, point(504, 128));
     assert_eq!(game.outcome(), Some(Outcome::Defeat));
 }

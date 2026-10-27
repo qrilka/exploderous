@@ -158,9 +158,9 @@ fn typed_starts_preserve_world_position_and_place_buroru_at_cell_centres() {
     assert_eq!(game.character().position, point(144, 128));
     assert_eq!(game.character().kind, CharacterKind::Bomber);
     assert_eq!(game.character().control, ControlSource::Human);
-    assert_eq!(game.enemies()[0].position, point(640, 384));
-    assert_eq!(game.enemies()[0].kind, CharacterKind::Buroru);
-    assert_eq!(game.enemies()[0].control, ControlSource::Npc);
+    assert_eq!(game.enemies().next().unwrap().position, point(640, 384));
+    assert_eq!(game.enemies().next().unwrap().kind, CharacterKind::Buroru);
+    assert_eq!(game.enemies().next().unwrap().control, ControlSource::Npc);
 }
 
 #[test]
