@@ -121,8 +121,8 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
 #[test]
 fn small_scenario_outcomes_are_centered_without_bypassing_terminal_size_checks() {
     use exploderous_core::game::{
-        CellCoord, Character, CharacterId, CharacterKind, Column, ControlSource, GameRules,
-        Outcome, Position, Row, Scenario, Terrain, WorldX, WorldY,
+        CellCoord, CharacterId, Column, GameRules, HumanBomberStart, Outcome, Position, Row,
+        Scenario, Terrain, WorldX, WorldY,
     };
     for arena_height in [1, 2] {
         for outcome in [Outcome::Defeat, Outcome::Victory] {
@@ -132,11 +132,9 @@ fn small_scenario_outcomes_are_centered_without_bypassing_terminal_size_checks()
                 1,
                 arena_height,
                 vec![Terrain::Floor; arena_height as usize],
-                Character {
+                HumanBomberStart {
                     id: CharacterId::new(0),
                     position: Position::new(WorldX::new(128), WorldY::new(128)),
-                    kind: CharacterKind::Bomber,
-                    control: ControlSource::Human,
                 },
                 rules,
             )

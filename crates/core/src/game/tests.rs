@@ -12,8 +12,8 @@ mod wandering_policy;
 
 use super::{
     Arena, CellCoord, Character, CharacterCommand, CharacterId, CharacterKind, Column,
-    ConstructionError, ControlSource, Direction, Game, GameRules, Position, Row, Scenario,
-    StepError, Terrain, WorldX, WorldY,
+    ConstructionError, ControlSource, Direction, Game, GameRules, HumanBomberStart, Position, Row,
+    Scenario, StepError, Terrain, WorldX, WorldY,
 };
 
 const ID: CharacterId = CharacterId::new(42);
@@ -24,7 +24,7 @@ struct ScenarioInput {
     width: u32,
     height: u32,
     terrain: Vec<Terrain>,
-    character: Character,
+    character: HumanBomberStart,
 }
 
 impl ScenarioInput {
@@ -88,11 +88,9 @@ fn scenario(width: u32, height: u32, terrain: Vec<Terrain>, x: i32, y: i32) -> S
         width,
         height,
         terrain,
-        character: Character {
+        character: HumanBomberStart {
             id: ID,
             position: point(x, y),
-            kind: CharacterKind::Bomber,
-            control: ControlSource::Human,
         },
     }
 }
@@ -144,6 +142,28 @@ fn arena_owns_typed_cell_conversion_and_row_major_terrain_access() {
 }
 
 #[test]
+fn typed_starts_preserve_world_position_and_place_buroru_at_cell_centres() {
+    let player = super::HumanBomberStart {
+        id: ID,
+        position: point(144, 128),
+    };
+    let scenario = Scenario::new(3, 2, vec![Terrain::Floor; 6], player, GameRules::default())
+        .unwrap()
+        .with_enemies(vec![super::BuroruStart {
+            id: CharacterId::new(7),
+            cell: cell(2, 1),
+        }])
+        .unwrap();
+    let game = Game::new(scenario, 0);
+    assert_eq!(game.character().position, point(144, 128));
+    assert_eq!(game.character().kind, CharacterKind::Bomber);
+    assert_eq!(game.character().control, ControlSource::Human);
+    assert_eq!(game.enemies()[0].position, point(640, 384));
+    assert_eq!(game.enemies()[0].kind, CharacterKind::Buroru);
+    assert_eq!(game.enemies()[0].control, ControlSource::Npc);
+}
+
+#[test]
 fn construction_observes_the_complete_authored_state() {
     let authored = scenario(2, 1, vec![Terrain::Floor; 2], 256, 128);
     let game = Game::new(authored.clone().parse(GameRules::default()).unwrap(), 0);
@@ -151,18 +171,16 @@ fn construction_observes_the_complete_authored_state() {
     assert_eq!(game.arena().width(), 2);
     assert_eq!(game.arena().height(), 1);
     assert_eq!(game.arena().terrain(), authored.terrain);
-    assert_eq!(game.character(), &authored.character);
+    assert_eq!(game.character(), &Character::from(authored.character));
     assert_eq!(game.rules(), &GameRules::new(192, 16).unwrap());
     assert_eq!(game.clone(), game);
 }
 
 #[test]
 fn scenario_keeps_the_rules_that_make_its_starting_footprint_legal() {
-    let character = Character {
+    let character = HumanBomberStart {
         id: ID,
         position: point(64, 128),
-        kind: CharacterKind::Bomber,
-        control: ControlSource::Human,
     };
     assert_eq!(
         Scenario::new(

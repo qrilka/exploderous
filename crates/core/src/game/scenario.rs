@@ -38,13 +38,11 @@ impl Scenario {
                 (x == 0 && y <= 2) || (y == 0 && x <= 2)
             })
             .collect();
-        let player = Character {
+        let player = HumanBomberStart {
             id: CharacterId::new(0),
             position: arena
                 .cell_center(reserved[0])
                 .expect("opening is in bounds"),
-            kind: CharacterKind::Bomber,
-            control: ControlSource::Human,
         };
         // In this classic grid, every non-pillar has a monotone route from (0,0),
         // so corridor distance ignoring Blocks is exactly column + row.
@@ -69,11 +67,9 @@ impl Scenario {
             .collect();
             reserved.push(cell);
             reserved.push(neighbors[random_choice(&mut state, neighbors.len() as u64)]);
-            enemies.push(Character {
+            enemies.push(BuroruStart {
                 id: CharacterId::new(id),
-                position: arena.cell_center(cell).expect("candidate is in bounds"),
-                kind: CharacterKind::Buroru,
-                control: ControlSource::Npc,
+                cell,
             });
         }
         let mut eligible: Vec<CellCoord> = cells
@@ -112,17 +108,14 @@ impl Scenario {
         width: u32,
         height: u32,
         terrain: Vec<Terrain>,
-        character: Character,
+        character: HumanBomberStart,
         rules: GameRules,
     ) -> Result<Self, ConstructionError> {
         let arena = Arena::new(width, height, terrain)?;
         arena.validate_start(character.position, rules)?;
-        if character.kind != CharacterKind::Bomber || character.control != ControlSource::Human {
-            return Err(ConstructionError::InvalidCharacterControl);
-        }
         Ok(Self {
             arena,
-            character,
+            character: character.into(),
             enemies: Vec::new(),
             rules,
             exit: None,
@@ -138,25 +131,24 @@ impl Scenario {
     }
 
     /// Author centred Buroru. Identities are unique; overlapping Characters are legal.
-    pub fn with_enemies(mut self, mut enemies: Vec<Character>) -> Result<Self, ConstructionError> {
+    pub fn with_enemies(mut self, starts: Vec<BuroruStart>) -> Result<Self, ConstructionError> {
         let mut identities = BTreeSet::from([self.character.id]);
-        for enemy in &enemies {
-            if !identities.insert(enemy.id) {
+        let mut enemies = Vec::with_capacity(starts.len());
+        for start in starts {
+            if !identities.insert(start.id) {
                 return Err(ConstructionError::DuplicateCharacterId);
             }
-            if enemy.kind != CharacterKind::Buroru || enemy.control != ControlSource::Npc {
-                return Err(ConstructionError::InvalidCharacterControl);
-            }
-            self.arena
-                .validate_start(enemy.position, GameRules::default())?;
-            if self
+            let position = self
                 .arena
-                .cell_containing(enemy.position)
-                .and_then(|cell| self.arena.cell_center(cell))
-                != Some(enemy.position)
-            {
-                return Err(ConstructionError::InvalidStartingPosition);
-            }
+                .cell_center(start.cell)
+                .ok_or(ConstructionError::InvalidStartingPosition)?;
+            self.arena.validate_start(position, GameRules::default())?;
+            enemies.push(Character {
+                id: start.id,
+                position,
+                kind: CharacterKind::Buroru,
+                control: ControlSource::Npc,
+            });
         }
         // Canonical identity order, independent of authored vector order.
         enemies.sort_by_key(|enemy| enemy.id);

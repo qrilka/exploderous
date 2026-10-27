@@ -66,11 +66,6 @@ fn generated_normal_scenarios_obey_geometry_opening_and_object_contracts() {
                 assert_eq!(game.enemies().len(), 3, "{context}");
                 let mut starts = Vec::new();
                 for enemy in game.enemies() {
-                    assert_eq!(
-                        (enemy.kind, enemy.control),
-                        (CharacterKind::Buroru, ControlSource::Npc),
-                        "{context}"
-                    );
                     let start = arena.cell_containing(enemy.position).unwrap();
                     assert!(!starts.contains(&start), "{context}");
                     starts.push(start);

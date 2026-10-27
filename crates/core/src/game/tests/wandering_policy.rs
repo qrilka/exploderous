@@ -1,12 +1,12 @@
 use super::support::{action, bomber, cell, enemy, point};
 use crate::game::{
-    Character, CharacterCommand, CharacterId, Direction, Game, GameRules, Scenario, StepError,
+    BuroruStart, CharacterCommand, CharacterId, Direction, Game, GameRules, Scenario, StepError,
     Terrain,
 };
 
 mod probability;
 
-fn corridor(seed: u64, length: u32, enemies: Vec<Character>, rules: GameRules) -> Scenario {
+fn corridor(seed: u64, length: u32, enemies: Vec<BuroruStart>, rules: GameRules) -> Scenario {
     let mut terrain = vec![Terrain::Floor; length as usize * 3];
     terrain[length as usize..length as usize * 2].fill(Terrain::Wall);
     Scenario::new(length, 3, terrain, bomber(point(128, 640)), rules)

@@ -1,10 +1,10 @@
 use super::support::{action, bomber, cell, enemy, point};
 use crate::game::{
-    Character, CharacterCommand, CharacterId, CharacterKind, ControlSource, Game, GameRules,
-    Outcome, Position, Scenario, Terrain,
+    BuroruStart, Character, CharacterCommand, CharacterId, Game, GameRules, Outcome, Position,
+    Scenario, Terrain,
 };
 
-fn scenario(position: Position, rules: GameRules, enemies: Vec<Character>) -> Scenario {
+fn scenario(position: Position, rules: GameRules, enemies: Vec<BuroruStart>) -> Scenario {
     Scenario::new(5, 3, vec![Terrain::Floor; 15], bomber(position), rules)
         .unwrap()
         .with_enemies(enemies)
@@ -333,7 +333,7 @@ fn bomb_passage_is_per_character_and_belongs_only_to_the_current_bomb() {
 }
 
 #[test]
-fn scenario_validation_owns_identity_control_and_canonical_enemy_footprints() {
+fn scenario_validation_owns_identity_cells_and_canonical_enemy_footprints() {
     use crate::game::ConstructionError;
     let rules = GameRules::new(2, 16).unwrap();
     let mut terrain = vec![Terrain::Floor; 15];
@@ -349,44 +349,19 @@ fn scenario_validation_owns_identity_control_and_canonical_enemy_footprints() {
             Err(ConstructionError::DuplicateCharacterId)
         );
     }
-    for position in [
-        point(1, 384),
-        point(1280, 384),
-        point(384, 128),
-        point(640, 128),
-        point(255, 128),
-        point(96, 384), // Legal Footprint, but an off-centre authored start.
+    for cell in [
+        cell(5, 1),
+        cell(0, 3),
+        cell(u32::MAX, 1),
+        cell(1, 0),
+        cell(2, 0),
     ] {
         assert_eq!(
-            initial.clone().with_enemies(vec![enemy(7, position)]),
+            initial.clone().with_enemies(vec![BuroruStart {
+                id: CharacterId::new(7),
+                cell,
+            }]),
             Err(ConstructionError::InvalidStartingPosition)
-        );
-    }
-    for invalid in [
-        Character {
-            control: ControlSource::Human,
-            ..enemy(7, point(128, 384))
-        },
-        Character {
-            kind: CharacterKind::Bomber,
-            ..enemy(7, point(128, 384))
-        },
-    ] {
-        assert_eq!(
-            initial.clone().with_enemies(vec![invalid]),
-            Err(ConstructionError::InvalidCharacterControl)
-        );
-    }
-    for invalid in [
-        enemy(0, point(128, 384)),
-        Character {
-            control: ControlSource::Npc,
-            ..bomber(point(128, 384))
-        },
-    ] {
-        assert_eq!(
-            Scenario::new(1, 2, vec![Terrain::Floor; 2], invalid, rules),
-            Err(ConstructionError::InvalidCharacterControl)
         );
     }
     // Canonical enemy Footprint remains independent of the tiny bomber Footprint.
@@ -443,6 +418,7 @@ fn wandering_enemies_lock_the_exit_and_can_initially_share_cells() {
     .with_exit(cell(0, 0))
     .unwrap();
     let mut game = Game::new(scenario, 0);
+    let enemies = game.enemies().to_vec();
     assert!(!game.exit_ready());
     for _ in 0..10 {
         game.step(&[]).unwrap();
@@ -455,7 +431,7 @@ fn wandering_enemies_lock_the_exit_and_can_initially_share_cells() {
             .all(|(after, before)| after.id == before.id)
     );
     assert_ne!(game.enemies(), enemies);
-    assert_eq!(game.character(), &bomber(point(128, 128)));
+    assert_eq!(game.character(), &Character::from(bomber(point(128, 128))));
     assert_eq!(game.outcome(), None);
     assert_eq!(game.tick(), 10);
     game.step(&[CharacterCommand {

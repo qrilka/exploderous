@@ -2,8 +2,8 @@ use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use exploderous_core::game::{
-    CellCoord, Character, CharacterId, CharacterKind, Column, ControlSource, GameRules, Position,
-    Row, Scenario, Terrain, WorldX, WorldY,
+    BuroruStart, CellCoord, CharacterId, Column, GameRules, HumanBomberStart, Position, Row,
+    Scenario, Terrain, WorldX, WorldY,
 };
 use exploderous_tui::{App, TICK_INTERVAL};
 
@@ -33,11 +33,9 @@ pub fn app_with_rules(now: Instant, width: u16, height: u16, rules: GameRules) -
         13,
         13,
         terrain,
-        Character {
+        HumanBomberStart {
             id: CharacterId::new(0),
             position: Position::new(WorldX::new(128), WorldY::new(128)),
-            kind: CharacterKind::Bomber,
-            control: ControlSource::Human,
         },
         rules,
     )
@@ -46,11 +44,9 @@ pub fn app_with_rules(now: Instant, width: u16, height: u16, rules: GameRules) -
         [2, 4, 6]
             .into_iter()
             .enumerate()
-            .map(|(index, row)| Character {
+            .map(|(index, row)| BuroruStart {
                 id: CharacterId::new(index as u32 + 1),
-                position: Position::new(WorldX::new(8 * 256 + 128), WorldY::new(row * 256 + 128)),
-                kind: CharacterKind::Buroru,
-                control: ControlSource::Npc,
+                cell: cell(8, row),
             })
             .collect(),
     )

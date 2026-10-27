@@ -27,14 +27,11 @@ fn normal_level_has_thirteen_playable_cells_per_axis_and_a_protected_opening() {
 
 #[test]
 fn authored_buroru_wander_on_idle_ticks_pause_completely_and_restart_generates() {
-    use exploderous_core::game::{CharacterKind, ControlSource};
     let mut now = Instant::now();
     let mut app = support::app(now, 19, 17);
     let enemies = app.game().enemies().to_vec();
     assert_eq!(enemies.len(), 3);
     for (index, enemy) in enemies.iter().enumerate() {
-        assert_eq!(enemy.kind, CharacterKind::Buroru);
-        assert_eq!(enemy.control, ControlSource::Npc);
         assert_ne!(enemy.id, app.game().character().id);
         assert!(enemies[..index].iter().all(|other| other.id != enemy.id));
     }

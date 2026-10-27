@@ -158,13 +158,38 @@ pub enum ControlSource {
     Npc,
 }
 
-/// Authored Character data; Scenario validates kind/control and placement together.
+/// A human-controlled bomber's authored start for Normal mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HumanBomberStart {
+    pub id: CharacterId,
+    pub position: Position,
+}
+
+/// A Buroru's authored start. Scenario resolves its Cell centre and validates placement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BuroruStart {
+    pub id: CharacterId,
+    pub cell: CellCoord,
+}
+
+/// Read-only Character observations retain kind and control as distinct concepts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Character {
     pub id: CharacterId,
     pub position: Position,
     pub kind: CharacterKind,
     pub control: ControlSource,
+}
+
+impl From<HumanBomberStart> for Character {
+    fn from(start: HumanBomberStart) -> Self {
+        Self {
+            id: start.id,
+            position: start.position,
+            kind: CharacterKind::Bomber,
+            control: ControlSource::Human,
+        }
+    }
 }
 
 /// Validated starting arena and character placement, bound to its game rules.
@@ -205,7 +230,6 @@ pub enum ConstructionError {
     InvalidExitLocation,
     InvalidFireUpLocation,
     DuplicateCharacterId,
-    InvalidCharacterControl,
     InvalidBlockDensity,
 }
 

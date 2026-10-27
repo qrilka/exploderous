@@ -68,19 +68,16 @@ fn centered_map_has_thirteen_playable_cells_inside_a_separate_frame() {
 #[test]
 fn an_explicit_larger_scenario_pauses_until_its_own_frame_fits() {
     use exploderous_core::game::{
-        Character, CharacterId, CharacterKind, ControlSource, GameRules, Position, Scenario,
-        Terrain, WorldX, WorldY,
+        CharacterId, GameRules, HumanBomberStart, Position, Scenario, Terrain, WorldX, WorldY,
     };
     let now = Instant::now();
     let scenario = Scenario::new(
         21,
         18,
         vec![Terrain::Floor; 21 * 18],
-        Character {
+        HumanBomberStart {
             id: CharacterId::new(0),
             position: Position::new(WorldX::new(128), WorldY::new(128)),
-            kind: CharacterKind::Bomber,
-            control: ControlSource::Human,
         },
         GameRules::default(),
     )
