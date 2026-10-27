@@ -58,7 +58,10 @@ fn assert_step(game: &mut Game, frame: &[CharacterCommand], expected: Position) 
         expected.y().value(),
     );
     authored.character.id = game.character().id;
-    let expected_game = Game::new(authored.parse(*game.rules()).unwrap(), game.tick() + 1);
+    let expected_game = Game::new(
+        authored.parse(*game.rules()).unwrap(),
+        crate::game::Tick::new(game.tick().value() + 1),
+    );
     game.step(frame).unwrap();
     assert_eq!(*game, expected_game, "frame={frame:?}");
 }
@@ -154,7 +157,7 @@ fn typed_starts_preserve_world_position_and_place_buroru_at_cell_centres() {
             cell: cell(2, 1),
         }])
         .unwrap();
-    let game = Game::new(scenario, 0);
+    let game = Game::new(scenario, crate::game::Tick::new(0));
     assert_eq!(game.character().position, point(144, 128));
     assert_eq!(game.character().kind, CharacterKind::Bomber);
     assert_eq!(game.character().control, ControlSource::Human);
@@ -166,8 +169,11 @@ fn typed_starts_preserve_world_position_and_place_buroru_at_cell_centres() {
 #[test]
 fn construction_observes_the_complete_authored_state() {
     let authored = scenario(2, 1, vec![Terrain::Floor; 2], 256, 128);
-    let game = Game::new(authored.clone().parse(GameRules::default()).unwrap(), 0);
-    assert_eq!(game.tick(), 0);
+    let game = Game::new(
+        authored.clone().parse(GameRules::default()).unwrap(),
+        crate::game::Tick::new(0),
+    );
+    assert_eq!(game.tick().value(), 0);
     assert_eq!(game.arena().width(), 2);
     assert_eq!(game.arena().height(), 1);
     assert_eq!(game.arena().terrain(), authored.terrain);
@@ -200,7 +206,7 @@ fn scenario_keeps_the_rules_that_make_its_starting_footprint_legal() {
         GameRules::new(128, 1024).unwrap(),
     )
     .unwrap();
-    let mut game = Game::new(scenario, 0);
+    let mut game = Game::new(scenario, crate::game::Tick::new(0));
     assert_step(&mut game, &[command(Direction::Right)], point(192, 128));
 }
 
@@ -295,9 +301,9 @@ fn scenario_construction_rejects_invalid_data_and_accepts_limits() {
                 authored
                     .parse(GameRules::new(side, distance).unwrap())
                     .unwrap(),
-                u64::MAX,
+                crate::game::Tick::new(u64::MAX),
             );
-            assert_eq!(game.tick(), u64::MAX);
+            assert_eq!(game.tick().value(), u64::MAX);
             assert_eq!(game.character().id.value(), u32::MAX);
         }
     }
@@ -309,7 +315,7 @@ fn assert_rejected(game: &mut Game, frame: &[CharacterCommand], error: StepError
         game.step(frame),
         Err(error),
         "tick={}, frame={frame:?}",
-        before.tick()
+        before.tick().value()
     );
     assert_eq!(*game, before, "rejected frame={frame:?}");
 }
@@ -345,7 +351,7 @@ fn malformed_frames_are_atomic_and_error_priority_is_order_independent() {
     ];
     let scenario = rows("..", 128, 128).parse(GameRules::default()).unwrap();
     for tick in [0, u64::MAX] {
-        let mut game = Game::new(scenario.clone(), tick);
+        let mut game = Game::new(scenario.clone(), crate::game::Tick::new(tick));
         for (frame, error) in &faults {
             for shift in 0..frame.len() {
                 let mut reordered = frame.clone();
@@ -370,14 +376,20 @@ fn the_last_tick_succeeds_then_exhaustion_preserves_complete_state() {
         (160, vec![command(Direction::Right)], point(160, 128)),
     ] {
         let authored = rows(".#", start, 128);
-        let mut game = Game::new(authored.parse(GameRules::default()).unwrap(), u64::MAX - 1);
+        let mut game = Game::new(
+            authored.parse(GameRules::default()).unwrap(),
+            crate::game::Tick::new(u64::MAX - 1),
+        );
         assert_step(&mut game, &frame, expected);
-        assert_eq!(game.tick(), u64::MAX);
+        assert_eq!(game.tick().value(), u64::MAX);
         assert_rejected(&mut game, &frame, StepError::TickExhausted);
     }
     let mut authored = rows("..", 128, 128);
     authored.character.id = CharacterId::new(0);
-    let mut game = Game::new(authored.parse(GameRules::default()).unwrap(), 0);
+    let mut game = Game::new(
+        authored.parse(GameRules::default()).unwrap(),
+        crate::game::Tick::new(0),
+    );
     assert_step(
         &mut game,
         &[CharacterCommand {

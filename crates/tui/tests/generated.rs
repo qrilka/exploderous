@@ -15,7 +15,7 @@ fn generated_startup_outcome_and_restarts_follow_session_random_state_not_game_s
             app.game(),
             &Game::new(
                 Scenario::generate(rules, 40, &mut expected_state).unwrap(),
-                0
+                exploderous_core::game::Tick::new(0)
             )
         );
         for run in 0..3 {
@@ -28,7 +28,7 @@ fn generated_startup_outcome_and_restarts_follow_session_random_state_not_game_s
             assert_eq!(report.ticks.len(), 1);
             assert_eq!(report.discarded_ticks, 10);
             assert_eq!(app.game().outcome(), Some(Outcome::Defeat));
-            assert_eq!(app.game().tick(), 121);
+            assert_eq!(app.game().tick().value(), 121);
             let frozen = app.game().clone();
             app.handle_key(
                 KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
@@ -56,7 +56,7 @@ fn generated_startup_outcome_and_restarts_follow_session_random_state_not_game_s
                 app.game(),
                 &Game::new(
                     Scenario::generate(rules, 40, &mut expected_state).unwrap(),
-                    0
+                    exploderous_core::game::Tick::new(0)
                 )
             );
             assert_eq!(app.game().enemies().len(), 3);
@@ -102,7 +102,7 @@ fn generated_startup_outcome_and_restarts_follow_session_random_state_not_game_s
                 app.game(),
                 &Game::new(
                     Scenario::generate(rules, 40, &mut expected_state).unwrap(),
-                    0
+                    exploderous_core::game::Tick::new(0)
                 )
             );
         }

@@ -16,9 +16,9 @@ impl GameRules {
             footprint_side,
             movement_distance,
             turn_assistance: true,
-            bomb_fuse_ticks: 120,
+            bomb_fuse_ticks: TickSpan::new(120).unwrap(),
             blast_reach: 1,
-            blast_lifetime_ticks: 30,
+            blast_lifetime_ticks: TickSpan::new(30).unwrap(),
         })
     }
 
@@ -30,22 +30,19 @@ impl GameRules {
         reach: u32,
         lifetime_ticks: u64,
     ) -> Result<Self, ConstructionError> {
-        if fuse_ticks == 0 {
-            return Err(ConstructionError::InvalidBombFuse);
-        }
+        let fuse_ticks = TickSpan::new(fuse_ticks).ok_or(ConstructionError::InvalidBombFuse)?;
         if reach == 0 {
             return Err(ConstructionError::InvalidBlastReach);
         }
-        if lifetime_ticks == 0 {
-            return Err(ConstructionError::InvalidBlastLifetime);
-        }
+        let lifetime_ticks =
+            TickSpan::new(lifetime_ticks).ok_or(ConstructionError::InvalidBlastLifetime)?;
         self.bomb_fuse_ticks = fuse_ticks;
         self.blast_reach = reach;
         self.blast_lifetime_ticks = lifetime_ticks;
         Ok(self)
     }
 
-    pub fn bomb_fuse_ticks(&self) -> u64 {
+    pub fn bomb_fuse_ticks(&self) -> TickSpan {
         self.bomb_fuse_ticks
     }
 
@@ -53,7 +50,7 @@ impl GameRules {
         self.blast_reach
     }
 
-    pub fn blast_lifetime_ticks(&self) -> u64 {
+    pub fn blast_lifetime_ticks(&self) -> TickSpan {
         self.blast_lifetime_ticks
     }
 

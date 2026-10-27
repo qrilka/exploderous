@@ -18,7 +18,7 @@ fn moving_contact_requires_simultaneous_cells_not_the_union_of_visited_cells() {
     .unwrap()
     .with_enemies(vec![enemy(7, point(128, 128))])
     .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     for _ in 0..15 {
         game.step(&[]).unwrap();
     }
@@ -38,7 +38,7 @@ fn moving_contact_requires_simultaneous_cells_not_the_union_of_visited_cells() {
     .unwrap()
     .with_enemies(vec![enemy(7, point(128, 128))])
     .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     for _ in 0..16 {
         game.step(&[]).unwrap();
     }
@@ -67,7 +67,7 @@ fn passing_a_buroru_between_tick_endpoints_causes_defeat() {
     .unwrap()
     .with_enemies(vec![enemy(7, point(640, 128))])
     .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     // The Wall forces Left. Reach the Cell boundary through ordinary movement.
     for _ in 0..16 {
         game.step(&[]).unwrap();
@@ -100,7 +100,7 @@ fn assisted_forward_contact_uses_the_time_spent_on_correction_first() {
         .unwrap()
         .with_enemies(vec![enemy(7, point(1152, 384))])
         .unwrap();
-        let mut game = Game::new(initial, 0);
+        let mut game = Game::new(initial, crate::game::Tick::new(0));
         for _ in 0..prefix {
             game.step(&[]).unwrap();
         }
@@ -124,7 +124,7 @@ fn late_contact_between_boundary_instants_causes_defeat() {
     .unwrap()
     .with_enemies(vec![enemy(7, point(128, 128))])
     .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     // The arena edge forces Right. Reach x=248 through ordinary movement.
     for _ in 0..15 {
         game.step(&[]).unwrap();
@@ -161,7 +161,7 @@ fn contact_around_an_assisted_bend_uses_only_the_actual_path() {
         .unwrap()
         .with_enemies(vec![enemy(7, point(384, 384))])
         .unwrap();
-        let mut game = Game::new(initial, 0);
+        let mut game = Game::new(initial, crate::game::Tick::new(0));
         game.step(&[action(Some(Direction::Down), false)]).unwrap();
         // The Block requires 89 Left, then 935 Down. Cell (1,1) is shared
         // only for 88/1024 < t < 104/1024: x=512 and y=512 exclude its edges.
@@ -190,7 +190,7 @@ fn early_contact_before_another_cell_crossing_causes_defeat() {
     .unwrap()
     .with_enemies(vec![enemy(7, point(896, 128))])
     .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     // The right arena edge forces Left; the clear corridor preserves that heading.
     for _ in 0..48 {
         game.step(&[]).unwrap();

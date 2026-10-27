@@ -114,7 +114,7 @@ fn initial_heading_is_chosen_from_all_legal_cardinal_directions() {
             let initial = junction_scenario(Direction::Right, true, legal_count - 2, seed)
                 .with_enemies(vec![enemy(7, point(640, 640))])
                 .unwrap();
-            let mut game = Game::new(initial, 0);
+            let mut game = Game::new(initial, crate::game::Tick::new(0));
             game.step(&[]).unwrap();
             let index = match delta(point(640, 640), game.enemies().next().unwrap().position) {
                 (8, 0) => 0,

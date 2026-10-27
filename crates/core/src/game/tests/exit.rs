@@ -13,10 +13,16 @@ fn exit_construction_accepts_floor_or_block_but_rejects_walls_and_out_of_bounds(
     terrain[1] = Terrain::Wall;
     terrain[2] = Terrain::Block;
     let scenario = scenario(terrain, point(128, 384), GameRules::default());
-    assert_eq!(Game::new(scenario.clone(), 0).exit(), None);
+    assert_eq!(
+        Game::new(scenario.clone(), crate::game::Tick::new(0)).exit(),
+        None
+    );
     for exit in [cell(0, 0), cell(2, 0)] {
         let authored = scenario.clone().with_exit(exit).unwrap();
-        assert_eq!(Game::new(authored, 0).exit(), Some(exit));
+        assert_eq!(
+            Game::new(authored, crate::game::Tick::new(0)).exit(),
+            Some(exit)
+        );
     }
     for exit in [cell(1, 0), cell(5, 0), cell(0, 3), cell(u32::MAX, u32::MAX)] {
         assert_eq!(
@@ -37,9 +43,9 @@ fn victory_requires_final_centre_entry_not_footprint_overlap_or_a_missing_object
             point(start_x, 384),
             GameRules::default(),
         );
-        let mut no_objective = Game::new(initial.clone(), 0);
+        let mut no_objective = Game::new(initial.clone(), crate::game::Tick::new(0));
         let initial = initial.with_exit(cell(1, 1)).unwrap();
-        let mut game = Game::new(initial.clone(), 0);
+        let mut game = Game::new(initial.clone(), crate::game::Tick::new(0));
         let fresh = game.clone();
         game.step(&[]).unwrap();
         assert_eq!(game.outcome(), None); // overlap without centre entry cannot win
@@ -64,7 +70,7 @@ fn victory_requires_final_centre_entry_not_footprint_overlap_or_a_missing_object
         assert_eq!(game, won);
         assert_eq!(sibling, won);
         assert!(game.bomb().is_some()); // even this live fuse is frozen
-        assert_eq!(Game::new(initial, 0), fresh);
+        assert_eq!(Game::new(initial, crate::game::Tick::new(0)), fresh);
     }
 }
 
@@ -79,7 +85,7 @@ fn a_covered_exit_is_blocking_and_survives_reveal_and_later_blasts() {
     let initial = scenario(terrain, point(640, 384), rules)
         .with_exit(cell(3, 1))
         .unwrap();
-    let mut game = Game::new(initial.clone(), 7);
+    let mut game = Game::new(initial.clone(), crate::game::Tick::new(7));
     let fresh = game.clone();
     let mut blocked = game.clone();
     blocked
@@ -111,7 +117,7 @@ fn a_covered_exit_is_blocking_and_survives_reveal_and_later_blasts() {
         assert_ne!(game, sibling); // independent continuation, no shared mutable state
         game.step(&[action(Some(Direction::Right), false)]).unwrap();
     }
-    assert_eq!(Game::new(initial, 7), fresh); // restores covered terrain and initial clock
+    assert_eq!(Game::new(initial, crate::game::Tick::new(7)), fresh); // restores covered terrain and initial clock
 }
 
 #[test]
@@ -126,7 +132,7 @@ fn harm_wins_over_exit_entry_from_new_blasts_and_crossed_existing_blasts() {
             scenario(vec![Terrain::Floor; 15], point(640, 384), rules)
                 .with_exit(exit)
                 .unwrap(),
-            0,
+            crate::game::Tick::new(0),
         );
         game.step(&[action(None, true)]).unwrap();
         game.step(&[action(Some(Direction::Left), false)]).unwrap();

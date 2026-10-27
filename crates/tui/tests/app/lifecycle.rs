@@ -25,7 +25,7 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
             Outcome::Victory => {
                 support::prepare_ready_exit(&mut app, &mut now);
                 support::travel(&mut app, &mut now, KeyCode::Left, 2);
-                (KeyCode::Down, app.game().tick() + 2)
+                (KeyCode::Down, app.game().tick().value() + 2)
             }
         };
         let mut continuation = app.game().clone();
@@ -36,7 +36,7 @@ fn reachable_outcomes_stop_catch_up_freeze_input_and_restart_cleanly() {
         assert_eq!(report.ticks.len(), 2); // don't finish the batch after an outcome
         assert_eq!(report.discarded_ticks, 9);
         assert_eq!(app.game().outcome(), Some(outcome));
-        assert_eq!(app.game().tick(), terminal_tick);
+        assert_eq!(app.game().tick().value(), terminal_tick);
         for record in &report.ticks {
             continuation
                 .step(&[CharacterCommand {
@@ -230,7 +230,7 @@ fn reset_recreates_the_game_and_discards_held_input_and_tick_backlog() {
     let reset_at = start + TICK_INTERVAL * 10;
     app.handle_key(press(KeyCode::Char('R')), reset_at);
 
-    assert_eq!(app.game().tick(), 0);
+    assert_eq!(app.game().tick().value(), 0);
     assert_eq!(app.game().character().position, point(128, 128));
     assert_eq!(app.held_direction(), None);
     assert_eq!(app.advance(reset_at).unwrap().ticks.len(), 0);
@@ -277,7 +277,7 @@ fn help_pauses_movement_and_ignores_reset_and_quit_until_closed() {
     assert_eq!(app.held_direction(), None);
     app.handle_key(press(KeyCode::Char('r')), start);
     app.handle_key(press(KeyCode::Char('q')), start);
-    assert_eq!(app.game().tick(), 0);
+    assert_eq!(app.game().tick().value(), 0);
     assert!(!app.quit_requested());
 
     app.handle_key(press(KeyCode::Esc), start);

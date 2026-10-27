@@ -8,7 +8,10 @@ mod movement;
 mod propagation;
 
 fn game(layout: &str, position: Position, rules: GameRules, tick: u64) -> Game {
-    Game::new(scenario(layout, position, rules), tick)
+    Game::new(
+        scenario(layout, position, rules),
+        crate::game::Tick::new(tick),
+    )
 }
 
 mod timers;
@@ -23,7 +26,7 @@ fn a_new_blast_kills_in_the_final_centre_cell_and_freezes_the_complete_run() {
     sibling.step(&[]).unwrap();
     assert_eq!(game, sibling);
     assert_eq!(game.outcome(), Some(Outcome::Defeat));
-    assert_eq!(game.tick(), 2);
+    assert_eq!(game.tick().value(), 2);
     assert_eq!(game.arena().terrain_at(cell(1, 0)), Some(Terrain::Floor));
     assert_eq!(game.blasts().len(), 1);
     let defeated = game.clone();
@@ -210,7 +213,7 @@ fn walls_blocks_and_arena_edges_bound_even_a_very_large_reach() {
     }
     let mut corner = Game::new(
         Scenario::new(1, 1, vec![Terrain::Floor], bomber(point(128, 128)), rules).unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     corner.step(&[action(None, true)]).unwrap();
     corner.step(&[]).unwrap();
@@ -287,7 +290,7 @@ fn lingering_blasts_trigger_new_bombs_without_expanding_old_coverage() {
     assert_eq!(game.blasts().len(), 2);
     assert_eq!(game.blasts()[0], old); // destroyed Block never extends old coverage
     assert!(game.blasts()[1].cells().contains(&cell(3, 0)));
-    assert_eq!(game.blasts()[1].expires_at(), 8);
+    assert_eq!(game.blasts()[1].expires_at().value(), 8);
     assert_eq!(game.outcome(), Some(Outcome::Defeat));
 }
 
@@ -319,14 +322,14 @@ fn overlapping_effects_expire_independently_while_the_player_survives() {
     );
     game.step(&[]).unwrap();
     game.step(&[]).unwrap();
-    assert_eq!(game.tick(), 6);
+    assert_eq!(game.tick().value(), 6);
     assert_eq!(game.blasts().len(), 1);
-    assert_eq!(game.blasts()[0].expires_at(), 8);
+    assert_eq!(game.blasts()[0].expires_at().value(), 8);
     assert!(game.blasts()[0].cells().contains(&cell(2, 1)));
     game.step(&[]).unwrap();
     game.step(&[]).unwrap();
     assert!(game.blasts().is_empty());
     assert_eq!(game.outcome(), None);
     game.step(&[action(None, true)]).unwrap();
-    assert_eq!(game.bomb().unwrap().detonate_at(), 10);
+    assert_eq!(game.bomb().unwrap().detonate_at().value(), 10);
 }

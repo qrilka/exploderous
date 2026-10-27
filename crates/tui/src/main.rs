@@ -93,7 +93,7 @@ fn run_ui(rules: GameRules) -> io::Result<()> {
     trace_app_state(format_args!("start size={width}x{height}"), &app);
     let position = app.game().character().position;
     info!(
-        tick = app.game().tick(),
+        tick = app.game().tick().value(),
         position_x = position.x().value(),
         position_y = position.y().value(),
         arena_width = app.game().arena().width(),
@@ -127,7 +127,7 @@ fn run_ui(rules: GameRules) -> io::Result<()> {
         }
         for tick in report.ticks {
             trace!(
-                tick = tick.tick,
+                tick = tick.tick.value(),
                 direction = ?tick.direction,
                 place_bomb = tick.place_bomb,
                 position_x = tick.position.x().value(),
@@ -181,7 +181,7 @@ fn trace_app_state(message: impl std::fmt::Display, app: &App) {
         held_direction = ?app.held_direction(),
         help_open = app.help_open(),
         quit_requested = app.quit_requested(),
-        game_tick = app.game().tick(),
+        game_tick = app.game().tick().value(),
         position_x = position.x().value(),
         position_y = position.y().value(),
         "{}",

@@ -21,7 +21,7 @@ fn empty_input_advances_a_persistent_half_speed_centred_run() {
     // A one-way start forces Right; the distant player is isolated below the corridor.
     let mut game = Game::new(
         corridor(0, 13, vec![enemy(7, point(128, 128))], GameRules::default()),
-        0,
+        crate::game::Tick::new(0),
     );
     for tick in 1..=32 {
         game.step(&[]).unwrap();
@@ -46,7 +46,7 @@ fn a_clear_corridor_keeps_its_heading_beyond_the_old_maximum_run_duration() {
                 vec![enemy(7, point(128, 128))],
                 GameRules::default(),
             ),
-            0,
+            crate::game::Tick::new(0),
         );
         for tick in 1..=320 {
             game.step(&[]).unwrap();
@@ -103,7 +103,7 @@ fn junction_scenario(
 fn junction(direction: Direction, forward_open: bool, side_count: usize, seed: u64) -> Game {
     let mut game = Game::new(
         junction_scenario(direction, forward_open, side_count, seed),
-        0,
+        crate::game::Tick::new(0),
     );
     for _ in 0..32 {
         game.step(&[]).unwrap();
@@ -135,7 +135,7 @@ fn blocked_forward_and_reverse_leave_only_the_legal_side_category() {
             .with_enemies(vec![enemy(7, point(384, 640))])
             .unwrap()
             .with_random_seed(seed);
-            let mut game = Game::new(initial, 0);
+            let mut game = Game::new(initial, crate::game::Tick::new(0));
             game.step(&[]).unwrap();
             // The extra player access gives two initial choices. Observe the
             // Right approaches; do not assert a particular seed-to-heading map.
@@ -194,7 +194,10 @@ fn forced_travel_reversals_and_trapped_waiting_do_not_spend_other_enemies_random
         .unwrap()
         .with_random_seed(seed);
         let main = enemy(7, point(384, 640));
-        let mut alone = Game::new(initial.clone().with_enemies(vec![main]).unwrap(), 0);
+        let mut alone = Game::new(
+            initial.clone().with_enemies(vec![main]).unwrap(),
+            crate::game::Tick::new(0),
+        );
         let mut together = Game::new(
             initial
                 .with_enemies(vec![
@@ -203,7 +206,7 @@ fn forced_travel_reversals_and_trapped_waiting_do_not_spend_other_enemies_random
                     enemy(2, point(1152, 128)),
                 ])
                 .unwrap(),
-            0,
+            crate::game::Tick::new(0),
         );
         for tick in 1..=200 {
             alone.step(&[]).unwrap();
@@ -238,7 +241,7 @@ fn obstructions_interrupt_at_centres_trapped_enemies_wait_and_bodies_do_not_bloc
                 enemy(8, point(128, 128)),
             ])
             .unwrap();
-        let mut game = Game::new(initial, 0);
+        let mut game = Game::new(initial, crate::game::Tick::new(0));
         for tick in 1..=128 {
             game.step(&[]).unwrap();
             let a = game.enemies().next().unwrap().position;
@@ -266,8 +269,8 @@ fn identity_order_clone_continuation_and_rejected_frames_preserve_all_policy_sta
     let initial = junction_scenario(Direction::Right, true, 2, 91);
     let a = initial.clone().with_enemies(enemies).unwrap();
     let b = initial.with_enemies(reordered).unwrap();
-    let mut game = Game::new(a, 0);
-    let mut reordered = Game::new(b, 0);
+    let mut game = Game::new(a, crate::game::Tick::new(0));
+    let mut reordered = Game::new(b, crate::game::Tick::new(0));
     // Pass a random junction decision, then clone between centres.
     for _ in 0..49 {
         game.step(&[]).unwrap();
@@ -303,7 +306,7 @@ fn identity_order_clone_continuation_and_rejected_frames_preserve_all_policy_sta
     // Fail placement on a tick that would otherwise consume junction randomness.
     let mut near_limit = Game::new(
         junction_scenario(Direction::Right, true, 2, 91),
-        u64::MAX - 33,
+        crate::game::Tick::new(u64::MAX - 33),
     );
     for _ in 0..32 {
         near_limit.step(&[]).unwrap();
@@ -321,7 +324,7 @@ fn identity_order_clone_continuation_and_rejected_frames_preserve_all_policy_sta
             .unwrap();
         let mut game = Game::new(
             corridor(91, 13, vec![enemy(7, point(128, 128))], rules),
-            tick,
+            crate::game::Tick::new(tick),
         );
         if preplace {
             game.step(&[action(None, true)]).unwrap();
@@ -367,7 +370,7 @@ fn ordinary_wandering_crosses_and_reverses_over_a_new_bomb_until_full_clearance(
             .with_enemies(vec![enemy(7, point(128, 128))])
             .unwrap()
             .with_random_seed(seed);
-            let mut game = Game::new(initial, 0);
+            let mut game = Game::new(initial, crate::game::Tick::new(0));
             for _ in 0..8 {
                 game.step(&[]).unwrap();
             }
@@ -438,7 +441,7 @@ fn a_bomb_appearing_ahead_stops_an_in_flight_route_without_off_centre_turns() {
     .unwrap()
     .with_enemies(vec![enemy(7, point(128, 128))])
     .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     game.step(&[action(None, true)]).unwrap();
     assert!(!game.bomb().unwrap().escape_allowed_for(CharacterId::new(7)));
     game.step(&[action(Some(Direction::Right), false)]).unwrap();
@@ -471,7 +474,7 @@ fn clones_cross_random_decisions_after_one_moving_enemy_is_removed() {
         .with_enemies(vec![enemy(7, point(128, 128)), enemy(99, point(384, 1152))])
         .unwrap()
         .with_random_seed(91);
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     for _ in 0..17 {
         game.step(&[]).unwrap();
     }
@@ -499,7 +502,7 @@ fn wandering_does_not_consume_fire_up() {
     let initial = corridor(0, 5, vec![enemy(7, point(128, 128))], GameRules::default())
         .with_fire_up(cell(1, 0))
         .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     for _ in 0..32 {
         game.step(&[]).unwrap();
     }

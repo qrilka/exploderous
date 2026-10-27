@@ -5,6 +5,9 @@ use std::collections::BTreeSet;
 mod rules;
 mod scenario;
 mod simulation;
+mod time;
+
+pub use time::{Tick, TickSpan};
 
 const BURORU_MOVEMENT_DISTANCE: u32 = 8;
 const GENERATED_ARENA_SIZE: u32 = 13;
@@ -212,9 +215,9 @@ pub struct GameRules {
     footprint_side: u32,
     movement_distance: u32,
     turn_assistance: bool,
-    bomb_fuse_ticks: u64,
+    bomb_fuse_ticks: TickSpan,
     blast_reach: u32,
-    blast_lifetime_ticks: u64,
+    blast_lifetime_ticks: TickSpan,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,7 +256,7 @@ pub struct CharacterCommand {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bomb {
     cell: CellCoord,
-    detonate_at: u64,
+    detonate_at: Tick,
     blast_reach: u64,
     escape_allowed: Vec<CharacterId>,
 }
@@ -267,7 +270,7 @@ impl Bomb {
         self.cell
     }
 
-    pub fn detonate_at(&self) -> u64 {
+    pub fn detonate_at(&self) -> Tick {
         self.detonate_at
     }
 
@@ -280,7 +283,7 @@ impl Bomb {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Blast {
     cells: Vec<CellCoord>,
-    expires_at: u64,
+    expires_at: Tick,
 }
 
 impl Blast {
@@ -292,7 +295,7 @@ impl Blast {
         &self.cells
     }
 
-    pub fn expires_at(&self) -> u64 {
+    pub fn expires_at(&self) -> Tick {
         self.expires_at
     }
 }
@@ -614,7 +617,7 @@ pub struct Game {
     character: Character,
     enemies: Vec<BuroruState>,
     random_state: u64,
-    tick: u64,
+    tick: Tick,
     rules: GameRules,
     bomb: Option<Bomb>,
     blasts: Vec<Blast>,

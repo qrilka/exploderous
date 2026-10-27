@@ -30,7 +30,7 @@ fn off_centre_placement_does_not_block_an_open_dead_end_retreat() {
             game.step(&[action(Some(Direction::Up), false)]).unwrap();
         }
         assert_eq!(game.character().position, point(160, 160));
-        assert_eq!(game.tick(), 17);
+        assert_eq!(game.tick().value(), 17);
         // This tiny Arena proves retreat, not Blast survival: both Cells will burn.
         assert_eq!(game.outcome(), None);
     }
@@ -51,8 +51,8 @@ fn overlapping_escape_can_cross_the_bomb_centre_but_cannot_reenter_after_clearan
         game.step(&[action(Some(Direction::Right), false)]).unwrap();
         assert_eq!(game.character().position, point(160, 128));
         assert_eq!(game.bomb().unwrap().cell(), cell(1, 0));
-        assert_eq!(game.bomb().unwrap().detonate_at(), 121);
-        assert_eq!(game.tick(), 3); // shortened movement is still an ordinary tick
+        assert_eq!(game.bomb().unwrap().detonate_at().value(), 121);
+        assert_eq!(game.tick().value(), 3); // shortened movement is still an ordinary tick
         assert_eq!(game.outcome(), None);
     }
 }
@@ -130,7 +130,7 @@ fn assistance_can_approach_during_correction_and_forward_travel() {
     // The body's top stays at y=512: exact contact with the Wall is legal.
     game.step(&[action(Some(Direction::Left), false)]).unwrap();
     assert_eq!(game.character().position, point(432, 608));
-    assert_eq!(game.tick(), 2);
+    assert_eq!(game.tick().value(), 2);
 }
 
 #[test]
@@ -276,5 +276,5 @@ fn permission_ends_only_when_the_whole_footprint_leaves_the_bomb_cell() {
     game.step(&[action(Some(Direction::Left), true)]).unwrap(); // full capacity is ordinary gameplay
     assert_eq!(game.character().position, point(144, 128));
     assert_eq!(game.bomb(), Some(&bomb));
-    assert_eq!(game.tick(), 19);
+    assert_eq!(game.tick().value(), 19);
 }

@@ -34,9 +34,9 @@ fn malformed_frames_and_deadline_overflow_preserve_complete_state() {
         effects.step(&[command]).unwrap();
     }
     assert_eq!(effects.outcome(), None);
-    assert_eq!(effects.tick(), u64::MAX - 1);
+    assert_eq!(effects.tick().value(), u64::MAX - 1);
     assert_eq!(effects.blasts().len(), 1);
-    assert_eq!(effects.blasts()[0].expires_at(), u64::MAX);
+    assert_eq!(effects.blasts()[0].expires_at().value(), u64::MAX);
     let before = effects.clone();
     assert_eq!(
         effects.step(&[action(Some(Direction::Left), true)]),
@@ -60,9 +60,9 @@ fn malformed_frames_and_deadline_overflow_preserve_complete_state() {
     let mut full = game("...", point(128, 128), rules, 0);
     full.step(&[action(None, true)]).unwrap();
     full.step(&[action(Some(Direction::Right), true)]).unwrap();
-    assert_eq!(full.tick(), 2);
+    assert_eq!(full.tick().value(), 2);
     assert_eq!(full.character().position, point(144, 128));
-    assert_eq!(full.bomb().unwrap().detonate_at(), u64::MAX);
+    assert_eq!(full.bomb().unwrap().detonate_at().value(), u64::MAX);
 }
 
 #[test]
@@ -70,9 +70,9 @@ fn bomb_parameters_are_validated_and_drive_propagation_and_deadlines() {
     let defaults = GameRules::default();
     assert_eq!(
         (
-            defaults.bomb_fuse_ticks(),
+            defaults.bomb_fuse_ticks().value(),
             defaults.blast_reach(),
-            defaults.blast_lifetime_ticks()
+            defaults.blast_lifetime_ticks().value()
         ),
         (120, 1, 30)
     );
@@ -99,11 +99,11 @@ fn bomb_parameters_are_validated_and_drive_propagation_and_deadlines() {
         9,
     );
     game.step(&[action(None, true)]).unwrap();
-    assert_eq!(game.bomb().unwrap().detonate_at(), 12);
+    assert_eq!(game.bomb().unwrap().detonate_at().value(), 12);
     game.step(&[action(Some(Direction::Right), false)]).unwrap();
     assert!(game.bomb().is_some());
     game.step(&[action(Some(Direction::Up), false)]).unwrap();
-    assert_eq!(game.blasts()[0].expires_at(), 16);
+    assert_eq!(game.blasts()[0].expires_at().value(), 16);
     let mut cells = game.blasts()[0].cells().to_vec();
     cells.sort_by_key(|cell| (cell.row().value(), cell.column().value()));
     assert_eq!(
@@ -134,8 +134,11 @@ fn bomb_parameters_are_validated_and_drive_propagation_and_deadlines() {
 fn detonation_and_expiry_follow_absolute_tick_deadlines() {
     let mut game = game("...\n...\n...", point(384, 384), GameRules::default(), 9);
     game.step(&[action(None, true)]).unwrap();
-    assert_eq!(game.tick(), 10);
-    assert_eq!(game.bomb().unwrap().detonate_at(), 130);
+    assert_eq!(game.tick(), crate::game::Tick::new(10));
+    assert_eq!(
+        game.bomb().unwrap().detonate_at(),
+        crate::game::Tick::new(130)
+    );
     for tick in 11..=129 {
         let movement = match tick {
             11..=26 => Some(Direction::Right),
@@ -147,11 +150,11 @@ fn detonation_and_expiry_follow_absolute_tick_deadlines() {
         assert!(game.blasts().is_empty());
     }
     game.step(&[]).unwrap();
-    assert_eq!(game.tick(), 130);
+    assert_eq!(game.tick().value(), 130);
     assert!(game.bomb().is_none());
     assert_eq!(game.blasts().len(), 1);
     assert_eq!(game.blasts()[0].origin(), cell(1, 1));
-    assert_eq!(game.blasts()[0].expires_at(), 160);
+    assert_eq!(game.blasts()[0].expires_at().value(), 160);
     let mut coverage = game.blasts()[0].cells().to_vec();
     coverage.sort_by_key(|cell| (cell.row().value(), cell.column().value()));
     assert_eq!(
@@ -163,7 +166,7 @@ fn detonation_and_expiry_follow_absolute_tick_deadlines() {
         assert_eq!(game.blasts().len(), 1);
     }
     game.step(&[]).unwrap();
-    assert_eq!(game.tick(), 160);
+    assert_eq!(game.tick().value(), 160);
     assert!(game.blasts().is_empty());
 }
 #[test]
@@ -180,20 +183,20 @@ fn a_tick_130_blast_is_dangerous_on_159_but_not_during_movement_on_160() {
     // Stage both runs before the last dangerous tick to compare crossings before/after expiry.
     for tick in 12..=158 {
         game.step(&[]).unwrap();
-        assert_eq!(game.tick(), tick);
+        assert_eq!(game.tick().value(), tick);
     }
     assert_eq!(game.outcome(), None);
-    assert_eq!(game.blasts()[0].expires_at(), 160);
+    assert_eq!(game.blasts()[0].expires_at().value(), 160);
     assert_eq!(game.character().position, point(640, 160)); // touches the upper arm's edge
     let mut on_159 = game.clone();
     on_159
         .step(&[action(Some(Direction::Down), false)])
         .unwrap();
-    assert_eq!(on_159.tick(), 159);
+    assert_eq!(on_159.tick().value(), 159);
     assert_eq!(on_159.outcome(), Some(Outcome::Defeat));
     game.step(&[]).unwrap(); // stationary exact-edge contact remains safe on tick 159
     game.step(&[action(Some(Direction::Down), false)]).unwrap();
-    assert_eq!(game.tick(), 160);
+    assert_eq!(game.tick().value(), 160);
     assert_eq!(game.character().position, point(640, 640));
     assert_eq!(game.outcome(), None);
     assert!(game.blasts().is_empty());
@@ -211,8 +214,8 @@ fn expired_blasts_cannot_trigger_a_bomb_placed_on_the_expiry_tick() {
     for _ in 3..=6 {
         game.step(&[]).unwrap();
     }
-    assert_eq!(game.blasts()[0].expires_at(), 7);
+    assert_eq!(game.blasts()[0].expires_at().value(), 7);
     game.step(&[action(Some(Direction::Left), true)]).unwrap();
     assert!(game.blasts().is_empty());
-    assert_eq!(game.bomb().unwrap().detonate_at(), 9);
+    assert_eq!(game.bomb().unwrap().detonate_at().value(), 9);
 }

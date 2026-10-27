@@ -6,7 +6,7 @@ fn cardinal_commands_apply_only_to_their_tick() {
         scenario(3, 3, vec![Terrain::Floor; 9], 384, 384)
             .parse(GameRules::default())
             .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     for (direction, expected) in [
         (Direction::Up, point(384, 368)),
@@ -108,14 +108,17 @@ fn swept_footprints_stop_at_the_first_obstruction_without_a_gap_or_sideways_moti
         ),
     ];
     for (authored, rules, direction, expected) in cases {
-        let mut game = Game::new(authored.clone().parse(rules).unwrap(), 0);
+        let mut game = Game::new(
+            authored.clone().parse(rules).unwrap(),
+            crate::game::Tick::new(0),
+        );
         assert_step(&mut game, &[command(direction)], expected);
         assert_step(&mut game, &[command(direction)], expected);
         assert_step(&mut game, &[], expected);
     }
     let mut approaching = Game::new(
         rows(".#..", 128, 128).parse(GameRules::default()).unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     for x in [144, 160, 160] {
         assert_step(&mut approaching, &[command(Right)], point(x, 128));
@@ -134,7 +137,7 @@ fn floor_edges_are_solid_and_exact_contact_is_safe() {
             rows(".", 128, 128)
                 .parse(GameRules::new(192, 1024).unwrap())
                 .unwrap(),
-            0,
+            crate::game::Tick::new(0),
         );
         assert_step(&mut game, &[command(direction)], expected);
         assert_step(&mut game, &[command(direction)], expected);
@@ -151,7 +154,7 @@ fn floor_edges_are_solid_and_exact_contact_is_safe() {
             )
             .parse(GameRules::new(side, 1024).unwrap())
             .unwrap(),
-            0,
+            crate::game::Tick::new(0),
         );
         assert_step(
             &mut game,
@@ -182,7 +185,7 @@ fn a_blocked_turn_spends_its_tick_budget_on_the_nearest_legal_entry() {
         rows("...\n.#.\n...", 192, 160)
             .parse(GameRules::default())
             .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     assert_step(&mut game, &[command(Direction::Down)], point(176, 160));
     let mut changed_direction = game.clone();
@@ -212,7 +215,7 @@ fn a_safe_entry_can_be_away_from_the_current_cell_centreline() {
         rows("...\n#..\n...", 352, 272)
             .parse(GameRules::default())
             .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     // The current Cell centreline is y=384 (Down), but the nearest safe
     // Left entry is y=160 (Up): 112 units of real correction.
@@ -252,7 +255,7 @@ fn assistance_is_symmetric_and_ignores_current_cell_offsets() {
             rows("...\n.#.\n...", x, y)
                 .parse(GameRules::default())
                 .unwrap(),
-            0,
+            crate::game::Tick::new(0),
         );
         assert_step(&mut game, &[command(direction)], expected);
     }
@@ -278,12 +281,15 @@ fn the_actual_correction_limit_is_inclusive_in_both_axes_and_directions() {
             (Left, point(608, coordinate), point(608, corrected)),
         ] {
             let authored = rows("...\n.#.\n...", start.x().value(), start.y().value());
-            let mut assisted = Game::new(authored.clone().parse(GameRules::default()).unwrap(), 0);
+            let mut assisted = Game::new(
+                authored.clone().parse(GameRules::default()).unwrap(),
+                crate::game::Tick::new(0),
+            );
             let mut strict = Game::new(
                 authored
                     .parse(GameRules::default().with_turn_assistance(false))
                     .unwrap(),
-                0,
+                crate::game::Tick::new(0),
             );
             assert_step(&mut assisted, &[command(direction)], expected);
             assert_step(&mut strict, &[command(direction)], start);
@@ -342,13 +348,13 @@ fn reported_playtest_stalls_reach_safe_entries_but_real_walls_stay_blocked() {
             rows(layout, start.x().value(), start.y().value())
                 .parse(GameRules::default())
                 .unwrap(),
-            0,
+            crate::game::Tick::new(0),
         );
         for _ in 0..ticks {
             game.step(&[command(direction)]).unwrap();
         }
         assert_eq!(game.character().position, entry);
-        assert_eq!(game.tick(), ticks);
+        assert_eq!(game.tick().value(), ticks);
         assert_step(&mut game, &[command(direction)], after_forward);
     }
 }
@@ -359,7 +365,7 @@ fn assistance_cannot_cross_an_obstruction_to_reach_a_forward_opening() {
         rows(".#.\n#..\n#..", 257, 257)
             .parse(GameRules::new(2, 1).unwrap())
             .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     // The Left opening above is only two units away, but the Up
     // correction would penetrate the Wall directly above the Character.
@@ -405,7 +411,7 @@ fn assistance_never_drifts_toward_a_blocked_or_unsafe_forward_path() {
             rows(layout, start.x().value(), start.y().value())
                 .parse(GameRules::new(192, distance).unwrap())
                 .unwrap(),
-            0,
+            crate::game::Tick::new(0),
         );
         assert_step(&mut game, &[command(direction)], expected);
     }
@@ -424,7 +430,10 @@ fn strict_off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_char
 #######
 "#;
     for x in [352, 416] {
-        let mut game = Game::new(rows(classic, x, 640).parse(strict).unwrap(), 0);
+        let mut game = Game::new(
+            rows(classic, x, 640).parse(strict).unwrap(),
+            crate::game::Tick::new(0),
+        );
         assert_step(&mut game, &[command(Direction::Up)], point(x, 624));
     }
     for x in [351, 417] {
@@ -433,7 +442,10 @@ fn strict_off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_char
             Err(ConstructionError::InvalidStartingPosition)
         );
     }
-    let mut turn = Game::new(rows(classic, 400, 417).parse(strict).unwrap(), 0);
+    let mut turn = Game::new(
+        rows(classic, 400, 417).parse(strict).unwrap(),
+        crate::game::Tick::new(0),
+    );
     assert_step(&mut turn, &[command(Direction::Right)], point(416, 417));
     assert_step(&mut turn, &[command(Direction::Right)], point(416, 417));
     assert_step(&mut turn, &[command(Direction::Up)], point(416, 401));
@@ -450,7 +462,7 @@ fn strict_off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_char
         )
         .parse(strict)
         .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     assert_step(&mut corner, &[command(Direction::Right)], point(176, 160));
     let mut blocked_corner = Game::new(
@@ -464,7 +476,7 @@ fn strict_off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_char
         )
         .parse(strict)
         .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     assert_step(
         &mut blocked_corner,
@@ -482,7 +494,7 @@ fn strict_off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_char
         )
         .parse(strict)
         .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     assert_step(&mut spanning, &[command(Direction::Down)], point(256, 272));
     let mut perpendicular = Game::new(
@@ -496,7 +508,7 @@ fn strict_off_centre_corridors_and_corner_contact_do_not_align_or_slide_the_char
         )
         .parse(strict)
         .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     assert_step(
         &mut perpendicular,

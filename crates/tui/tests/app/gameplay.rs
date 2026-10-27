@@ -88,7 +88,7 @@ fn ordinary_input_can_traverse_the_full_perimeter_without_crossing_the_exterior_
         let mut app = support::app_with_rules(now, width, height, support::objective_rules(true));
         support::prepare_ready_exit(&mut app, &mut now);
         support::travel(&mut app, &mut now, KeyCode::Up, 1);
-        let initial_tick = app.game().tick();
+        let initial_tick = app.game().tick().value();
         // 256 ticks exceeds the full thirteen-Cell extent. A ring of Walls, an
         // eleven-Cell interior, or centre-only bounds would stop at different positions.
         for (direction, expected) in [
@@ -101,7 +101,7 @@ fn ordinary_input_can_traverse_the_full_perimeter_without_crossing_the_exterior_
             assert_eq!(app.game().character().position, expected);
             assert_eq!(app.game().outcome(), None);
         }
-        assert_eq!(app.game().tick(), initial_tick + 1024);
+        assert_eq!(app.game().tick().value(), initial_tick + 1024);
     }
 }
 
@@ -128,7 +128,7 @@ fn the_reported_neighbouring_cell_escape_survives_but_remaining_in_danger_loses(
         app.handle_key(press(KeyCode::Char(' ')), start + TICK_INTERVAL * tick);
         tick += 1;
         app.advance(start + TICK_INTERVAL * tick).unwrap();
-        assert_eq!(app.game().bomb().unwrap().detonate_at(), 200);
+        assert_eq!(app.game().bomb().unwrap().detonate_at().value(), 200);
         for (code, count) in [(KeyCode::Up, 18), (KeyCode::Right, escape_ticks)] {
             app.handle_key(press(code), start + TICK_INTERVAL * tick);
             for _ in 0..count {
@@ -142,7 +142,7 @@ fn the_reported_neighbouring_cell_escape_survives_but_remaining_in_danger_loses(
             tick += 1;
             app.advance(start + TICK_INTERVAL * tick).unwrap();
         }
-        assert_eq!(app.game().tick(), 200);
+        assert_eq!(app.game().tick().value(), 200);
         assert_eq!(app.game().outcome(), outcome);
         // Blast Cell (4,0) ends at x=1280, exclusive. Centre 1264 is
         // still in danger; 1280 and the translated 1312 draw in safe (5,0),
@@ -186,13 +186,13 @@ fn ordinary_input_can_reverse_while_overlapping_a_bomb_but_cannot_reenter_after_
             (KeyCode::Right, 2, point(352, 128)),  // exact edge: fully clear
             (KeyCode::Left, 1, point(352, 128)),   // re-entry blocked
         ] {
-            let tick = app.game().tick();
+            let tick = app.game().tick().value();
             support::travel(&mut app, &mut now, direction, count);
-            assert_eq!(app.game().tick(), tick + u64::from(count));
+            assert_eq!(app.game().tick().value(), tick + u64::from(count));
             assert_eq!(app.game().character().position, expected);
             assert_eq!(app.game().outcome(), None);
         }
-        assert_eq!(app.game().bomb().unwrap().detonate_at(), 122);
+        assert_eq!(app.game().bomb().unwrap().detonate_at().value(), 122);
     }
 }
 
@@ -218,7 +218,7 @@ fn off_centre_dead_end_placement_allows_retreat_and_survival_through_the_blast()
             app.game().arena().cell_center(bomb.cell()),
             Some(point(1152, 384))
         );
-        assert_eq!(bomb.detonate_at(), 205);
+        assert_eq!(bomb.detonate_at().value(), 205);
         assert_eq!(app.game().character().position, point(1184, 416));
         // Waiting does not revoke permission. UP initially approaches the Bomb.
         support::ticks(&mut app, &mut now, 16);
@@ -227,7 +227,7 @@ fn off_centre_dead_end_placement_allows_retreat_and_survival_through_the_blast()
         support::travel(&mut app, &mut now, KeyCode::Right, 16);
         assert_eq!(app.game().character().position, point(1440, 160));
         support::ticks(&mut app, &mut now, 72);
-        assert_eq!(app.game().tick(), 205);
+        assert_eq!(app.game().tick().value(), 205);
         assert!(app.game().bomb().is_none());
         assert_eq!(app.game().blasts().len(), 1);
         assert_eq!(app.game().outcome(), None);
@@ -236,7 +236,7 @@ fn off_centre_dead_end_placement_allows_retreat_and_survival_through_the_blast()
             assert_eq!(app.game().character().position, point(1440, 160));
             assert_eq!(app.game().outcome(), None);
         }
-        assert_eq!(app.game().tick(), 235);
+        assert_eq!(app.game().tick().value(), 235);
         assert!(app.game().blasts().is_empty());
     }
 }
@@ -313,7 +313,7 @@ fn ordinary_input_reveals_collects_and_uses_fire_up_and_restart_restores_the_cov
     assert_ne!(Some(item), app.game().exit());
     assert_eq!(app.game().arena().terrain_at(item), Some(Terrain::Block));
     support::reveal_fire_up(&mut app, &mut now);
-    assert_eq!(app.game().tick(), 169);
+    assert_eq!(app.game().tick().value(), 169);
     assert_eq!(app.game().outcome(), None);
     assert_eq!(app.game().arena().terrain_at(item), Some(Terrain::Floor));
     assert_eq!(app.game().fire_up(), Some(item));

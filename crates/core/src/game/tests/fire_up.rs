@@ -7,9 +7,15 @@ use crate::game::{
 #[test]
 fn fire_up_construction_accepts_floor_or_block_and_rejects_walls_and_outside_cells() {
     let initial = scenario(".#+\n...", point(128, 384), GameRules::default());
-    assert_eq!(Game::new(initial.clone(), 0).fire_up(), None);
+    assert_eq!(
+        Game::new(initial.clone(), crate::game::Tick::new(0)).fire_up(),
+        None
+    );
     for location in [cell(0, 0), cell(2, 0)] {
-        let game = Game::new(initial.clone().with_fire_up(location).unwrap(), 0);
+        let game = Game::new(
+            initial.clone().with_fire_up(location).unwrap(),
+            crate::game::Tick::new(0),
+        );
         assert_eq!(game.fire_up(), Some(location));
         assert_eq!(game.current_blast_reach(), 1);
     }
@@ -34,7 +40,7 @@ fn collection_uses_the_centre_cell_and_precedes_same_tick_placement_and_cardinal
     )
     .with_fire_up(cell(3, 3))
     .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     game.step(&[action(Some(Direction::Right), true)]).unwrap();
     assert_eq!(game.fire_up(), None);
     assert_eq!(game.current_blast_reach(), 2);
@@ -69,7 +75,7 @@ fn revealing_effect_preserves_fire_up_but_a_distinct_effect_destroys_it_while_bo
     let initial = scenario(".....\n...+.\n.....\n.....\n.....", point(640, 384), rules)
         .with_fire_up(cell(3, 1))
         .unwrap();
-    let mut game = Game::new(initial.clone(), 0);
+    let mut game = Game::new(initial.clone(), crate::game::Tick::new(0));
     let fresh = game.clone();
     let mut blocked = game.clone();
     blocked
@@ -84,7 +90,7 @@ fn revealing_effect_preserves_fire_up_but_a_distinct_effect_destroys_it_while_bo
     assert_eq!(game.outcome(), None);
     assert_eq!(game.arena().terrain_at(cell(3, 1)), Some(Terrain::Floor));
     assert_eq!(game.fire_up(), Some(cell(3, 1)));
-    assert_eq!(game.blasts()[0].expires_at(), 13);
+    assert_eq!(game.blasts()[0].expires_at().value(), 13);
     let mut untouched = game.clone();
     for _ in 0..10 {
         untouched.step(&[]).unwrap();
@@ -113,7 +119,7 @@ fn revealing_effect_preserves_fire_up_but_a_distinct_effect_destroys_it_while_bo
     for run in [&mut game, &mut sibling] {
         run.step(&[action(Some(Direction::Right), false)]).unwrap();
         run.step(&[action(Some(Direction::Down), false)]).unwrap();
-        assert_eq!(run.tick(), 9);
+        assert_eq!(run.tick().value(), 9);
         assert_eq!(run.outcome(), None);
         assert_eq!(run.blasts().len(), 2);
         assert!(
@@ -125,7 +131,7 @@ fn revealing_effect_preserves_fire_up_but_a_distinct_effect_destroys_it_while_bo
         assert_eq!(run.current_blast_reach(), 1);
     }
     assert_eq!(game, sibling);
-    assert_eq!(Game::new(initial, 0), fresh);
+    assert_eq!(Game::new(initial, crate::game::Tick::new(0)), fresh);
 }
 
 #[test]
@@ -134,7 +140,7 @@ fn footprint_overlap_does_not_collect_and_half_open_centre_entry_does() {
         let initial = scenario("...\n...\n...", point(x, 384), GameRules::default())
             .with_fire_up(cell(1, 1))
             .unwrap();
-        let mut game = Game::new(initial, 0);
+        let mut game = Game::new(initial, crate::game::Tick::new(0));
         game.step(&[]).unwrap();
         assert_eq!(game.fire_up(), Some(cell(1, 1)));
         for step in 1..=steps {
@@ -161,7 +167,7 @@ fn ticking_bombs_keep_their_reach_but_later_bombs_gain_two_cells_in_all_four_dir
     )
     .with_fire_up(cell(5, 3))
     .unwrap();
-    let mut game = Game::new(initial.clone(), 0);
+    let mut game = Game::new(initial.clone(), crate::game::Tick::new(0));
     let fresh = game.clone();
     game.step(&[action(None, true)]).unwrap();
     let mut sibling = game.clone();
@@ -210,7 +216,7 @@ fn ticking_bombs_keep_their_reach_but_later_bombs_gain_two_cells_in_all_four_dir
         .step(&[action(Some(Direction::Left), false)])
         .unwrap();
     assert_ne!(game, sibling);
-    assert_eq!(Game::new(initial, 0), fresh);
+    assert_eq!(Game::new(initial, crate::game::Tick::new(0)), fresh);
 }
 
 #[test]
@@ -222,7 +228,7 @@ fn malformed_frames_and_both_deadline_overflows_cannot_partially_collect_or_upgr
     let initial = scenario(".....\n.....\n.....", point(384, 384), rules)
         .with_fire_up(cell(2, 1))
         .unwrap();
-    let mut game = Game::new(initial.clone(), 0);
+    let mut game = Game::new(initial.clone(), crate::game::Tick::new(0));
     let collect = action(Some(Direction::Right), true);
     let unknown = CharacterCommand {
         character: CharacterId::new(1),
@@ -236,11 +242,11 @@ fn malformed_frames_and_both_deadline_overflows_cannot_partially_collect_or_upgr
         assert_eq!(game.step(&frame), Err(error));
         assert_eq!(game, before);
     }
-    let mut game = Game::new(initial.clone(), u64::MAX - 1);
+    let mut game = Game::new(initial.clone(), crate::game::Tick::new(u64::MAX - 1));
     let before = game.clone();
     assert_eq!(game.step(&[collect]), Err(StepError::TickExhausted));
     assert_eq!(game, before); // collection and placement would both happen without fuse overflow
-    let mut game = Game::new(initial, u64::MAX - 3);
+    let mut game = Game::new(initial, crate::game::Tick::new(u64::MAX - 3));
     game.step(&[action(None, true)]).unwrap();
     game.step(&[]).unwrap();
     let before = game.clone();
@@ -261,7 +267,7 @@ fn the_maximum_base_reach_can_be_upgraded_without_wrapping_or_mutating_rules() {
         scenario(".....\n.....\n.....", point(128, 128), rules)
             .with_fire_up(cell(0, 0))
             .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     game.step(&[action(None, true)]).unwrap();
     assert_eq!(game.current_blast_reach(), u64::from(u32::MAX) + 1);
@@ -282,7 +288,7 @@ fn the_exit_does_not_require_collecting_or_preserving_fire_up() {
         .unwrap()
         .with_exit(cell(1, 2))
         .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     game.step(&[action(None, true)]).unwrap();
     game.step(&[action(Some(Direction::Down), false)]).unwrap();
     game.step(&[action(Some(Direction::Left), false)]).unwrap();
@@ -298,7 +304,7 @@ fn the_exit_does_not_require_collecting_or_preserving_fire_up() {
         .unwrap()
         .with_exit(cell(1, 1))
         .unwrap(),
-        0,
+        crate::game::Tick::new(0),
     );
     game.step(&[action(Some(Direction::Right), false)]).unwrap();
     assert_eq!(game.outcome(), Some(Outcome::Victory));

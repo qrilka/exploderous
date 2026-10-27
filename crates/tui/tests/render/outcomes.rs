@@ -48,7 +48,7 @@ fn the_exit_is_hidden_by_terrain_then_blasts_and_victory_has_a_distinct_modal() 
     let mut app = support::app(now, 19, 17);
     support::reveal_exit(&mut app, &mut now);
     assert_eq!(app.game().outcome(), None);
-    assert_eq!(app.game().tick(), 201);
+    assert_eq!(app.game().tick().value(), 201);
     assert_eq!(draw(&app, 19, 17).backend().buffer()[(7, 3)].symbol(), "│");
     assert!(!screen(&draw(&app, 19, 17)).join("\n").contains('⬚'));
     support::ticks(&mut app, &mut now, 30);
@@ -150,7 +150,7 @@ fn small_scenario_outcomes_are_centered_without_bypassing_terminal_size_checks()
                     .contains("Resize terminal")
             );
             support::ticks(&mut app, &mut now, 10);
-            assert_eq!(app.game().tick(), 0);
+            assert_eq!(app.game().tick().value(), 0);
             app.set_terminal_size(19, 17, now);
             if outcome == Outcome::Defeat {
                 app.handle_key(key(KeyCode::Char(' ')), now);

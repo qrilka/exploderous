@@ -151,14 +151,17 @@ fn off_centre_corridor_entries_make_safe_progress_within_fifteen_ticks() {
                 let start = rotate(640 + side * (32 + correction), 672);
                 let authored =
                     scenario(5, 5, terrain.clone(), start.x().value(), start.y().value());
-                let mut game = Game::new(authored.clone().parse(rules).unwrap(), 0);
+                let mut game = Game::new(
+                    authored.clone().parse(rules).unwrap(),
+                    crate::game::Tick::new(0),
+                );
                 let case = (direction, side, correction);
                 let mut entered = false;
                 for tick in 1..=15 {
                     let before = game.character().position;
                     game.step(&[command(direction)]).unwrap();
                     let after = game.character().position;
-                    assert_eq!(game.tick(), tick, "case={case:?}");
+                    assert_eq!(game.tick().value(), tick, "case={case:?}");
                     assert!(
                         reference_legal(&authored, rules, after),
                         "case={case:?}, tick={tick}"
@@ -296,8 +299,14 @@ fn deterministic_sequences_preserve_invariants_and_clones_continue_independently
     .flat_map(|rules| [rules.with_turn_assistance(false), rules])
     {
         let initial_tick = 0;
-        let mut game = Game::new(authored.clone().parse(rules).unwrap(), initial_tick);
-        let mut replay = Game::new(authored.clone().parse(rules).unwrap(), initial_tick);
+        let mut game = Game::new(
+            authored.clone().parse(rules).unwrap(),
+            crate::game::Tick::new(initial_tick),
+        );
+        let mut replay = Game::new(
+            authored.clone().parse(rules).unwrap(),
+            crate::game::Tick::new(initial_tick),
+        );
         let mut reference = authored.clone();
         let mut reference_tick = initial_tick;
         let mut continuation = None;
@@ -335,7 +344,10 @@ fn deterministic_sequences_preserve_invariants_and_clones_continue_independently
             );
             assert_eq!(
                 game,
-                Game::new(reference.clone().parse(rules).unwrap(), reference_tick),
+                Game::new(
+                    reference.clone().parse(rules).unwrap(),
+                    crate::game::Tick::new(reference_tick)
+                ),
                 "reference sequence, scenario={authored:?}, initial_tick={initial_tick}, rules={rules:?}, frame={frame:?}, step={step}"
             );
             assert_eq!(

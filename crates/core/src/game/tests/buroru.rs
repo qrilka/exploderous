@@ -20,7 +20,7 @@ fn external_npc_commands_are_rejected_atomically_with_deterministic_priority() {
             GameRules::default(),
             vec![enemy(7, point(640, 128))],
         ),
-        0,
+        crate::game::Tick::new(0),
     );
     game.step(&[action(None, true)]).unwrap();
     let npc = CharacterCommand {
@@ -88,7 +88,7 @@ fn contact_uses_half_open_centre_cells_and_the_whole_travelled_path() {
     ] {
         let mut game = Game::new(
             scenario(start, GameRules::default(), vec![enemy(7, target)]),
-            0,
+            crate::game::Tick::new(0),
         );
         game.step(&[action(Some(direction), false)]).unwrap();
         assert_eq!(game.character().position, expected);
@@ -101,7 +101,7 @@ fn contact_uses_half_open_centre_cells_and_the_whole_travelled_path() {
             GameRules::default(),
             vec![enemy(7, point(384, 128))],
         ),
-        0,
+        crate::game::Tick::new(0),
     );
     adjacent.step(&[]).unwrap();
     assert_eq!(adjacent.outcome(), None);
@@ -111,7 +111,7 @@ fn contact_uses_half_open_centre_cells_and_the_whole_travelled_path() {
             GameRules::new(192, 1024).unwrap(),
             vec![enemy(7, point(640, 128))],
         ),
-        0,
+        crate::game::Tick::new(0),
     );
     crossing.step(&[action(Some(Right), true)]).unwrap();
     assert_eq!(crossing.character().position, point(1152, 128));
@@ -140,7 +140,7 @@ fn turn_assistance_contact_checks_the_bend_not_the_endpoint_chord() {
     .unwrap()
     .with_enemies(vec![enemy(7, point(640, 128))])
     .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     game.step(&[action(Some(Left), false)]).unwrap();
     // (513,270) -> (513,255) -> (464,255); only the actual bend is in (2,0).
     assert_eq!(game.character().position, point(464, 255));
@@ -167,7 +167,7 @@ fn one_hit_kills_preserve_unrelated_identities_and_clone_independence() {
     .unwrap()
     .with_fire_up(cell(4, 2))
     .unwrap();
-    let mut game = Game::new(initial.clone(), 0);
+    let mut game = Game::new(initial.clone(), crate::game::Tick::new(0));
     game.step(&[action(None, true)]).unwrap();
     let mut sibling = game.clone();
     game.step(&[action(Some(Left), false)]).unwrap();
@@ -189,7 +189,12 @@ fn one_hit_kills_preserve_unrelated_identities_and_clone_independence() {
         game.enemies().map(|enemy| enemy.id).collect::<Vec<_>>(),
         vec![CharacterId::new(99)]
     );
-    assert_eq!(Game::new(initial, 0).enemies().len(), 3);
+    assert_eq!(
+        Game::new(initial, crate::game::Tick::new(0))
+            .enemies()
+            .len(),
+        3
+    );
 }
 
 #[test]
@@ -209,7 +214,7 @@ fn last_kill_wins_on_an_uncovered_exit_without_reentry_but_harm_takes_precedence
         if let Some(exit) = exit {
             initial = initial.with_exit(exit).unwrap();
         }
-        let mut game = Game::new(initial, 0);
+        let mut game = Game::new(initial, crate::game::Tick::new(0));
         game.step(&[action(None, true)]).unwrap();
         game.step(&[action(Some(Left), false)]).unwrap();
         assert_eq!(game.outcome(), None); // On the Exit already, but the enemy is alive.
@@ -240,7 +245,7 @@ fn contact_cannot_be_undone_by_killing_the_last_enemy_later_in_the_tick() {
     let initial = scenario(point(640, 384), rules, vec![enemy(7, point(896, 384))])
         .with_exit(cell(4, 1))
         .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     game.step(&[action(None, true)]).unwrap();
     game.step(&[action(Some(Right), false)]).unwrap();
     assert_eq!(game.character().position, point(1152, 384));
@@ -263,7 +268,7 @@ fn new_blast_hits_use_moving_enemy_centres_not_overlapping_footprints() {
             .unwrap()
             .with_enemies(vec![enemy(7, point(128, 384))])
             .unwrap();
-        let mut game = Game::new(initial, 0);
+        let mut game = Game::new(initial, crate::game::Tick::new(0));
         game.step(&[action(None, true)]).unwrap();
         game.step(&[action(Some(Right), false)]).unwrap();
         for _ in 2..=fuse {
@@ -297,7 +302,7 @@ fn bomb_passage_is_per_character_and_belongs_only_to_the_current_bomb() {
         .unwrap()
         .with_enemies(vec![enemy(7, point(128, 128)), enemy(99, point(128, 640))])
         .unwrap();
-    let mut game = Game::new(initial, 0);
+    let mut game = Game::new(initial, crate::game::Tick::new(0));
     for _ in 0..8 {
         game.step(&[]).unwrap();
     }
@@ -358,7 +363,11 @@ fn scenario_validation_owns_identity_cells_and_canonical_enemy_footprints() {
         .with_enemies(vec![enemy(u32::MAX, point(128, 384))])
         .unwrap();
     assert_eq!(
-        Game::new(legal, 0).enemies().next().unwrap().id,
+        Game::new(legal, crate::game::Tick::new(0))
+            .enemies()
+            .next()
+            .unwrap()
+            .id,
         CharacterId::new(u32::MAX)
     );
 }
@@ -378,7 +387,7 @@ fn deadline_failures_preserve_enemies_items_and_per_character_permissions() {
         let initial = scenario(point(384, 384), rules, vec![enemy(7, point(640, 384))])
             .with_fire_up(cell(1, 1))
             .unwrap();
-        let mut game = Game::new(initial, tick);
+        let mut game = Game::new(initial, crate::game::Tick::new(tick));
         if preplace {
             game.step(&[action(None, true)]).unwrap();
         }
@@ -406,7 +415,7 @@ fn wandering_enemies_lock_the_exit_and_can_initially_share_cells() {
     .unwrap()
     .with_exit(cell(0, 0))
     .unwrap();
-    let mut game = Game::new(scenario, 0);
+    let mut game = Game::new(scenario, crate::game::Tick::new(0));
     let enemies = game.enemies().copied().collect::<Vec<_>>();
     assert!(!game.exit_ready());
     for _ in 0..10 {
@@ -421,7 +430,7 @@ fn wandering_enemies_lock_the_exit_and_can_initially_share_cells() {
     assert_ne!(game.enemies().copied().collect::<Vec<_>>(), enemies);
     assert_eq!(game.character(), &Character::from(bomber(point(128, 128))));
     assert_eq!(game.outcome(), None);
-    assert_eq!(game.tick(), 10);
+    assert_eq!(game.tick().value(), 10);
     game.step(&[CharacterCommand {
         character: CharacterId::new(0),
         movement: None,

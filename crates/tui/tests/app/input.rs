@@ -37,7 +37,7 @@ fn one_space_press_is_consumed_once_even_across_detonation_in_a_catch_up_batch()
     assert!(app.game().bomb().is_none());
     app.handle_key(press(KeyCode::Char(' ')), start + TICK_INTERVAL * 7);
     app.advance(start + TICK_INTERVAL * 8).unwrap();
-    assert_eq!(app.game().bomb().unwrap().detonate_at(), 10);
+    assert_eq!(app.game().bomb().unwrap().detonate_at().value(), 10);
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn space_places_a_bomb_after_movement_on_the_next_tick() {
     let bomb = app.game().bomb().expect("Space placed a Bomb");
     assert_eq!(bomb.cell().column().value(), 0);
     assert_eq!(bomb.cell().row().value(), 0);
-    assert_eq!(bomb.detonate_at(), 121);
+    assert_eq!(bomb.detonate_at().value(), 121);
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn a_release_stops_future_tick_records_after_a_short_direction_press() {
     assert_eq!(
         first_tick.ticks,
         [TickRecord {
-            tick: 1,
+            tick: exploderous_core::game::Tick::new(1),
             direction: Some(Direction::Down),
             place_bomb: false,
             position: point(128, 144),
@@ -151,7 +151,7 @@ fn repeat_events_do_not_change_held_precedence_or_trigger_actions() {
     app.handle_key(press(KeyCode::Right), start);
     app.handle_key(key(KeyCode::Char('r'), KeyEventKind::Repeat), start);
     assert_eq!(app.held_direction(), Some(Direction::Right));
-    assert_eq!(app.game().tick(), 0);
+    assert_eq!(app.game().tick().value(), 0);
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn catch_up_processes_five_ticks_and_discards_the_remaining_backlog() {
     let report = app.advance(start + TICK_INTERVAL * 10).unwrap();
     assert_eq!(report.ticks.len(), 5);
     assert_eq!(report.discarded_ticks, 5);
-    assert_eq!(app.game().tick(), 5);
+    assert_eq!(app.game().tick().value(), 5);
     assert_eq!(app.game().character().position, point(208, 128));
     assert_eq!(
         app.advance(start + TICK_INTERVAL * 10).unwrap().ticks.len(),

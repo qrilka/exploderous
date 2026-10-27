@@ -18,7 +18,7 @@ fn classic_arena(position: Position, rules: GameRules) -> Game {
                   .............\n\
                   .#.#.#.#.#.#.\n\
                   .............";
-    Game::new(scenario(layout, position, rules), 0)
+    Game::new(scenario(layout, position, rules), crate::game::Tick::new(0))
 }
 
 fn step(game: &mut Game, movement: Option<Direction>, place_bomb: bool) {
@@ -36,7 +36,10 @@ fn a_two_unit_footprint_stops_at_exact_wall_contact_when_moving_up() {
         let rules = GameRules::new(2, 128)
             .unwrap()
             .with_turn_assistance(assisted);
-        let mut game = Game::new(scenario("#\n.\n.", point(128, 384), rules), 0);
+        let mut game = Game::new(
+            scenario("#\n.\n.", point(128, 384), rules),
+            crate::game::Tick::new(0),
+        );
         step(&mut game, Some(Direction::Up), false);
         // The Wall ends at y=256; the Footprint extends one unit above its centre.
         assert_eq!(

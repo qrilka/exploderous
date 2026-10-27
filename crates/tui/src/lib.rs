@@ -7,6 +7,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use exploderous_core::game::{
     CharacterCommand, Direction, Game, GameRules, Outcome, Position, Scenario, StepError, Terrain,
+    Tick,
 };
 use ratatui::{
     Frame,
@@ -62,7 +63,7 @@ a AI-controlled non-Enemy Character
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TickRecord {
-    pub tick: u64,
+    pub tick: Tick,
     pub direction: Option<Direction>,
     pub place_bomb: bool,
     pub position: Position,
@@ -121,7 +122,7 @@ impl App {
         generation_state: u64,
     ) -> Self {
         let mut app = Self {
-            game: Game::new(scenario, 0),
+            game: Game::new(scenario, Tick::ZERO),
             generation_state,
             held: Vec::new(),
             placement_pending: false,
@@ -318,7 +319,7 @@ impl App {
     fn reset(&mut self, now: Instant) {
         self.game = Game::new(
             Self::generate_scenario(*self.game.rules(), &mut self.generation_state),
-            0,
+            Tick::ZERO,
         );
         self.held.clear();
         self.placement_pending = false;

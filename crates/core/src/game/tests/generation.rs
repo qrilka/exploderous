@@ -37,7 +37,7 @@ fn generated_normal_scenarios_obey_geometry_opening_and_object_contracts() {
                 let mut state = seed;
                 let scenario = Scenario::generate(rules, percent, &mut state)
                     .unwrap_or_else(|error| panic!("{context}: {error:?}"));
-                let game = Game::new(scenario, 0);
+                let game = Game::new(scenario, crate::game::Tick::new(0));
                 let arena = game.arena();
                 assert_eq!((arena.width(), arena.height()), (13, 13), "{context}");
                 assert_eq!(arena.cells().count(), 169, "{context}");
@@ -138,7 +138,7 @@ fn density_is_a_target_and_invalid_requests_fail_explicitly() {
         let mut state = seed;
         let game = Game::new(
             Scenario::generate(GameRules::default(), 40, &mut state).unwrap(),
-            0,
+            crate::game::Tick::new(0),
         );
         blocks += game
             .arena()
@@ -170,7 +170,7 @@ fn generation_progresses_separately_from_game_clones_and_replays() {
             "seed={seed}"
         );
         let after_first = generation_state;
-        let mut game = Game::new(scenario.clone(), 0);
+        let mut game = Game::new(scenario.clone(), crate::game::Tick::new(0));
         game.step(&[CharacterCommand {
             character: game.character().id,
             movement: None,
@@ -196,7 +196,10 @@ fn generation_progresses_separately_from_game_clones_and_replays() {
             next,
             Scenario::generate(rules, 40, &mut replay_state).unwrap()
         );
-        assert_eq!(Game::new(scenario.clone(), 0), Game::new(scenario, 0));
+        assert_eq!(
+            Game::new(scenario.clone(), crate::game::Tick::new(0)),
+            Game::new(scenario, crate::game::Tick::new(0))
+        );
         let before = game.clone();
         let npc = CharacterCommand {
             character: game.enemies().next().unwrap().id,
@@ -212,7 +215,10 @@ fn generation_progresses_separately_from_game_clones_and_replays() {
 fn the_protected_opening_permits_escape_from_a_first_reach_one_bomb() {
     for assisted in [false, true] {
         let rules = GameRules::default().with_turn_assistance(assisted);
-        let mut game = Game::new(Scenario::generate(rules, 40, &mut 0).unwrap(), 0);
+        let mut game = Game::new(
+            Scenario::generate(rules, 40, &mut 0).unwrap(),
+            crate::game::Tick::new(0),
+        );
         game.step(&[CharacterCommand {
             character: game.character().id,
             movement: None,

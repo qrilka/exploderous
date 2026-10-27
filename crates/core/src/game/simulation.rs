@@ -3,7 +3,7 @@ use super::*;
 impl Game {
     /// Start from a validated scenario without replacing its rules or revalidating it.
     /// The game's clock is separate from the scenario; ordinary play starts at zero.
-    pub fn new(scenario: Scenario, initial_tick: u64) -> Self {
+    pub fn new(scenario: Scenario, initial_tick: Tick) -> Self {
         Self {
             arena: scenario.arena,
             character: scenario.character,
@@ -54,7 +54,10 @@ impl Game {
         if self.outcome.is_some() {
             return Ok(());
         }
-        let next_tick = self.tick.checked_add(1).ok_or(StepError::TickExhausted)?;
+        let next_tick = self
+            .tick
+            .checked_after(TickSpan::ONE)
+            .ok_or(StepError::TickExhausted)?;
         // Stage policy and RNG with movement: deadline failure must roll back decisions too.
         let mut random_state = self.random_state;
         let mut enemies = self.enemies.clone();
@@ -107,7 +110,7 @@ impl Game {
                     .cell_containing(position)
                     .expect("Character stays in Arena"),
                 detonate_at: next_tick
-                    .checked_add(self.rules.bomb_fuse_ticks)
+                    .checked_after(self.rules.bomb_fuse_ticks)
                     .ok_or(StepError::TickExhausted)?,
                 blast_reach: current_blast_reach,
                 escape_allowed: std::iter::once(Character {
@@ -143,7 +146,7 @@ impl Game {
             Some(Blast {
                 cells: self.blast_coverage(bomb.cell, bomb.blast_reach),
                 expires_at: next_tick
-                    .checked_add(self.rules.blast_lifetime_ticks)
+                    .checked_after(self.rules.blast_lifetime_ticks)
                     .ok_or(StepError::TickExhausted)?,
             })
         } else {
@@ -462,7 +465,7 @@ impl Game {
         self.outcome
     }
 
-    pub fn tick(&self) -> u64 {
+    pub fn tick(&self) -> Tick {
         self.tick
     }
 
