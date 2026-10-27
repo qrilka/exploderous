@@ -103,7 +103,7 @@ fn a_covered_exit_is_blocking_and_survives_reveal_and_later_blasts() {
             assert_eq!(run.outcome(), None);
             assert_eq!(run.exit(), Some(cell(3, 1)));
             assert_eq!(run.arena().terrain_at(cell(3, 1)), Some(Terrain::Floor));
-            assert!(run.blasts()[0].cells().contains(&cell(3, 1)));
+            assert!(run.blasts()[0].contains(cell(3, 1)));
             for _ in 0..3 {
                 run.step(&[]).unwrap();
             }
@@ -144,7 +144,7 @@ fn harm_wins_over_exit_entry_from_new_blasts_and_crossed_existing_blasts() {
                 .step(&[action(Some(Direction::Right), false)])
                 .unwrap();
             assert_eq!(game, sibling);
-            assert!(!game.blasts()[0].cells().contains(&exit)); // safe endpoint, lethal path
+            assert!(!game.blasts()[0].contains(exit)); // safe endpoint, lethal path
         }
         assert_eq!(
             game.arena().cell_containing(game.character().position),

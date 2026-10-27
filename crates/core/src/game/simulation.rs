@@ -75,25 +75,27 @@ impl Game {
             danger.intersects_centre_segment(start, bend)
                 || danger.intersects_centre_segment(bend, position)
         };
-        let path_harmed = self.blasts.iter().any(|blast| {
-            blast.expires_at > next_tick && blast.cells.iter().copied().any(path_touches)
-        }) || self.enemies.iter().zip(&enemies).any(|(before, after)| {
-            Motion {
-                points: [start, bend, position],
-                speed: self.rules.movement_distance,
-            }
-            .contacts(
-                &Motion {
-                    points: [
-                        before.character.position,
-                        before.character.position,
-                        after.character.position,
-                    ],
-                    speed: BURORU_MOVEMENT_DISTANCE,
-                },
-                &self.arena,
-            )
-        });
+        let path_harmed = self
+            .blasts
+            .iter()
+            .any(|blast| blast.expires_at > next_tick && blast.cells().any(path_touches))
+            || self.enemies.iter().zip(&enemies).any(|(before, after)| {
+                Motion {
+                    points: [start, bend, position],
+                    speed: self.rules.movement_distance,
+                }
+                .contacts(
+                    &Motion {
+                        points: [
+                            before.character.position,
+                            before.character.position,
+                            after.character.position,
+                        ],
+                        speed: BURORU_MOVEMENT_DISTANCE,
+                    },
+                    &self.arena,
+                )
+            });
         let final_cell = self
             .arena
             .cell_containing(position)
@@ -141,14 +143,17 @@ impl Game {
                 || self
                     .blasts
                     .iter()
-                    .any(|blast| blast.expires_at > next_tick && blast.cells.contains(&bomb.cell))
+                    .any(|blast| blast.expires_at > next_tick && blast.contains(bomb.cell))
         }) {
-            Some(Blast {
-                cells: self.blast_coverage(bomb.cell, bomb.blast_reach),
-                expires_at: next_tick
-                    .checked_after(self.rules.blast_lifetime_ticks)
-                    .ok_or(StepError::TickExhausted)?,
-            })
+            Some(
+                self.blast_coverage(
+                    bomb.cell,
+                    bomb.blast_reach,
+                    next_tick
+                        .checked_after(self.rules.blast_lifetime_ticks)
+                        .ok_or(StepError::TickExhausted)?,
+                ),
+            )
         } else {
             None
         };
@@ -178,11 +183,11 @@ impl Game {
             // Fixed lingering coverage cannot newly expose an Item: never reapply its hit.
             // Thus the revealing effect preserves it, but any distinct later effect can hit it.
             if self.fire_up.is_some_and(|cell| {
-                self.arena.terrain_at(cell) == Some(Terrain::Floor) && blast.cells.contains(&cell)
+                self.arena.terrain_at(cell) == Some(Terrain::Floor) && blast.contains(cell)
             }) {
                 self.fire_up = None;
             }
-            for &cell in &blast.cells {
+            for cell in blast.cells() {
                 if self.arena.terrain_at(cell) == Some(Terrain::Block) {
                     self.arena.set_terrain(cell, Terrain::Floor);
                 }
@@ -196,14 +201,9 @@ impl Game {
                 .expect("enemy stays in Arena");
             // A survivor starts clear of live Blasts. Its straight, sub-Cell step
             // cannot cross a dangerous Cell with both endpoints safe.
-            !self.blasts.iter().any(|blast| blast.cells.contains(&cell))
+            !self.blasts.iter().any(|blast| blast.contains(cell))
         });
-        if path_harmed
-            || self
-                .blasts
-                .iter()
-                .any(|blast| blast.cells.contains(&final_cell))
-        {
+        if path_harmed || self.blasts.iter().any(|blast| blast.contains(final_cell)) {
             self.outcome = Some(Outcome::Defeat);
         } else if self.exit == Some(final_cell) && self.exit_ready() {
             self.outcome = Some(Outcome::Victory);
@@ -289,8 +289,12 @@ impl Game {
         })
     }
 
-    fn blast_coverage(&self, origin: CellCoord, reach: u64) -> Vec<CellCoord> {
-        let mut cells = vec![origin];
+    fn blast_coverage(&self, origin: CellCoord, reach: u64, expires_at: Tick) -> Blast {
+        let mut blast = Blast {
+            origin,
+            arms: Vec::new(),
+            expires_at,
+        };
         for direction in [
             Direction::Up,
             Direction::Right,
@@ -311,14 +315,14 @@ impl Game {
                 if terrain == Terrain::Wall {
                     break;
                 }
-                cells.push(next);
+                blast.arms.push(next);
                 if terrain == Terrain::Block {
                     break;
                 }
                 cell = next;
             }
         }
-        cells
+        blast
     }
 
     // The actual perpendicular bend and final position, never speculative probes.

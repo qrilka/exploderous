@@ -35,12 +35,13 @@ Detonation removes the live bomb and produces a blast. Bomb capacity can therefo
 
 ```rust
 struct Blast {
-    cells: Vec<Cell>,
+    origin: CellCoord,
+    arms: Vec<CellCoord>,
     expires_at: Tick,
 }
 ```
 
-One blast record covers a set of cells and lasts for several simulation ticks. Compute its unique, in-bounds coverage at detonation using the selected propagation rules. Coverage includes the origin and cardinal rays; reach counts cells beyond the origin in each direction. Walls remain unharmed and stop rays. A block is destroyed, included in the blast, and stops its ray. The covered cells remain fixed for that effect's lifetime; later terrain changes do not extend an existing blast.
+One blast record covers a set of cells and lasts for several simulation ticks. Its origin is stored separately from its cardinal arms, making coverage structurally nonempty without duplicating the origin. `cells()` iterates the origin first, followed by arms; `contains(cell)` queries membership. Compute its unique, in-bounds coverage at detonation using the selected propagation rules. Coverage includes the origin and cardinal rays; reach counts cells beyond the origin in each direction. Walls remain unharmed and stop rays. A block is destroyed, included in the blast, and stops its ray. The covered cells remain fixed for that effect's lifetime; later terrain changes do not extend an existing blast.
 
 Each blast has its own lifetime. If A and B overlap, expiry of A must not remove B's danger. Cell danger is derived from live effect records; an independent mutable `is_on_fire` terrain flag would duplicate truth. An acceleration structure would be a derived index. Source attribution and other effect-specific state are required only by rules that depend on them.
 

@@ -204,8 +204,8 @@ fn walls_blocks_and_arena_edges_bound_even_a_very_large_reach() {
     game.step(&[action(None, true)]).unwrap();
     game.step(&[]).unwrap();
     assert_eq!(
-        game.blasts()[0].cells(),
-        &[cell(1, 1), cell(2, 1), cell(1, 2), cell(0, 1)]
+        game.blasts()[0].cells().collect::<Vec<_>>(),
+        [cell(1, 1), cell(2, 1), cell(1, 2), cell(0, 1)]
     );
     assert_eq!(game.arena().terrain_at(cell(1, 0)), Some(Terrain::Wall));
     for location in [cell(2, 1), cell(1, 2), cell(0, 1)] {
@@ -217,7 +217,7 @@ fn walls_blocks_and_arena_edges_bound_even_a_very_large_reach() {
     );
     corner.step(&[action(None, true)]).unwrap();
     corner.step(&[]).unwrap();
-    assert_eq!(corner.blasts()[0].cells(), &[cell(0, 0)]);
+    assert_eq!(corner.blasts()[0].cells().collect::<Vec<_>>(), [cell(0, 0)]);
 }
 
 #[test]
@@ -281,15 +281,15 @@ fn lingering_blasts_trigger_new_bombs_without_expanding_old_coverage() {
     assert!(game.bomb().is_none());
     let old = game.blasts()[0].clone();
     assert_eq!(
-        old.cells(),
-        &[cell(0, 0), cell(1, 0), cell(0, 1), cell(0, 2)]
+        old.cells().collect::<Vec<_>>(),
+        [cell(0, 0), cell(1, 0), cell(0, 1), cell(0, 2)]
     );
     assert_eq!(game.arena().terrain_at(cell(1, 0)), Some(Terrain::Floor));
     game.step(&[action(Some(Direction::Up), true)]).unwrap();
     assert!(game.bomb().is_none()); // old Blast triggers the newly placed Bomb
     assert_eq!(game.blasts().len(), 2);
     assert_eq!(game.blasts()[0], old); // destroyed Block never extends old coverage
-    assert!(game.blasts()[1].cells().contains(&cell(3, 0)));
+    assert!(game.blasts()[1].contains(cell(3, 0)));
     assert_eq!(game.blasts()[1].expires_at().value(), 8);
     assert_eq!(game.outcome(), Some(Outcome::Defeat));
 }
@@ -315,17 +315,13 @@ fn overlapping_effects_expire_independently_while_the_player_survives() {
         game.step(&[command]).unwrap();
     }
     assert_eq!(game.blasts().len(), 2);
-    assert!(
-        game.blasts()
-            .iter()
-            .all(|blast| blast.cells().contains(&cell(2, 1)))
-    );
+    assert!(game.blasts().iter().all(|blast| blast.contains(cell(2, 1))));
     game.step(&[]).unwrap();
     game.step(&[]).unwrap();
     assert_eq!(game.tick().value(), 6);
     assert_eq!(game.blasts().len(), 1);
     assert_eq!(game.blasts()[0].expires_at().value(), 8);
-    assert!(game.blasts()[0].cells().contains(&cell(2, 1)));
+    assert!(game.blasts()[0].contains(cell(2, 1)));
     game.step(&[]).unwrap();
     game.step(&[]).unwrap();
     assert!(game.blasts().is_empty());

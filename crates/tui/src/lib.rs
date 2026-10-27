@@ -441,7 +441,7 @@ fn render_game(frame: &mut Frame, app: &App, area: Rect) {
                         .blasts()
                         .iter()
                         .rev()
-                        .find(|blast| blast.cells().contains(&cell))
+                        .find(|blast| blast.contains(cell))
                     {
                         if cell == blast.origin() {
                             '┼'

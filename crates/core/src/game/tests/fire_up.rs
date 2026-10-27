@@ -50,7 +50,7 @@ fn collection_uses_the_centre_cell_and_precedes_same_tick_placement_and_cardinal
     game.step(&[action(Some(Direction::Left), false)]).unwrap();
     game.step(&[]).unwrap();
     assert_eq!(game.outcome(), None);
-    let cells = game.blasts()[0].cells();
+    let cells = game.blasts()[0].cells().collect::<Vec<_>>();
     assert_eq!(cells.len(), 6);
     for expected in [
         cell(3, 3),
@@ -122,11 +122,7 @@ fn revealing_effect_preserves_fire_up_but_a_distinct_effect_destroys_it_while_bo
         assert_eq!(run.tick().value(), 9);
         assert_eq!(run.outcome(), None);
         assert_eq!(run.blasts().len(), 2);
-        assert!(
-            run.blasts()
-                .iter()
-                .all(|blast| blast.cells().contains(&cell(3, 1)))
-        );
+        assert!(run.blasts().iter().all(|blast| blast.contains(cell(3, 1))));
         assert_eq!(run.fire_up(), None);
         assert_eq!(run.current_blast_reach(), 1);
     }
@@ -179,7 +175,7 @@ fn ticking_bombs_keep_their_reach_but_later_bombs_gain_two_cells_in_all_four_dir
         run.step(&[action(Some(Direction::Down), false)]).unwrap();
         run.step(&[action(Some(Direction::Right), false)]).unwrap();
         run.step(&[]).unwrap();
-        let cells = run.blasts()[0].cells();
+        let cells = run.blasts()[0].cells().collect::<Vec<_>>();
         assert_eq!(cells.len(), 5);
         for expected in [cell(4, 3), cell(4, 2), cell(5, 3), cell(4, 4), cell(3, 3)] {
             assert!(cells.contains(&expected));
@@ -195,7 +191,7 @@ fn ticking_bombs_keep_their_reach_but_later_bombs_gain_two_cells_in_all_four_dir
             run.step(&[action(Some(direction), false)]).unwrap();
         }
         assert_eq!(run.outcome(), None);
-        let cells = run.blasts()[0].cells();
+        let cells = run.blasts()[0].cells().collect::<Vec<_>>();
         assert_eq!(cells.len(), 9);
         for expected in [
             cell(6, 4),
@@ -274,7 +270,7 @@ fn the_maximum_base_reach_can_be_upgraded_without_wrapping_or_mutating_rules() {
     assert_eq!(game.bomb().unwrap().blast_reach(), u64::from(u32::MAX) + 1);
     assert_eq!(game.rules().blast_reach(), u32::MAX);
     game.step(&[action(Some(Direction::Down), false)]).unwrap();
-    assert_eq!(game.blasts()[0].cells().len(), 7); // whole first row and column, bounded by Arena
+    assert_eq!(game.blasts()[0].cells().count(), 7); // whole first row and column, bounded by Arena
 }
 
 #[test]

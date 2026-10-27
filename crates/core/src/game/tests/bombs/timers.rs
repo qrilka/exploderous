@@ -104,7 +104,7 @@ fn bomb_parameters_are_validated_and_drive_propagation_and_deadlines() {
     assert!(game.bomb().is_some());
     game.step(&[action(Some(Direction::Up), false)]).unwrap();
     assert_eq!(game.blasts()[0].expires_at().value(), 16);
-    let mut cells = game.blasts()[0].cells().to_vec();
+    let mut cells = game.blasts()[0].cells().collect::<Vec<_>>();
     cells.sort_by_key(|cell| (cell.row().value(), cell.column().value()));
     assert_eq!(
         cells,
@@ -155,7 +155,7 @@ fn detonation_and_expiry_follow_absolute_tick_deadlines() {
     assert_eq!(game.blasts().len(), 1);
     assert_eq!(game.blasts()[0].origin(), cell(1, 1));
     assert_eq!(game.blasts()[0].expires_at().value(), 160);
-    let mut coverage = game.blasts()[0].cells().to_vec();
+    let mut coverage = game.blasts()[0].cells().collect::<Vec<_>>();
     coverage.sort_by_key(|cell| (cell.row().value(), cell.column().value()));
     assert_eq!(
         coverage,

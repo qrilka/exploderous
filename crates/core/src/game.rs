@@ -282,17 +282,23 @@ impl Bomb {
 /// One fixed, nonempty coverage set with an independent expiry deadline.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Blast {
-    cells: Vec<CellCoord>,
+    origin: CellCoord,
+    arms: Vec<CellCoord>,
     expires_at: Tick,
 }
 
 impl Blast {
     pub fn origin(&self) -> CellCoord {
-        self.cells[0]
+        self.origin
     }
 
-    pub fn cells(&self) -> &[CellCoord] {
-        &self.cells
+    /// Fixed coverage, origin first followed by cardinal arms.
+    pub fn cells(&self) -> impl Iterator<Item = CellCoord> + '_ {
+        std::iter::once(self.origin).chain(self.arms.iter().copied())
+    }
+
+    pub fn contains(&self, cell: CellCoord) -> bool {
+        self.origin == cell || self.arms.contains(&cell)
     }
 
     pub fn expires_at(&self) -> Tick {

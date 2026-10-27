@@ -333,7 +333,6 @@ fn ordinary_input_reveals_collects_and_uses_fire_up_and_restart_restores_the_cov
     assert!(
         app.game().blasts()[0]
             .cells()
-            .iter()
             .any(|cell| cell.column().value() == 2 && cell.row().value() == 0)
     );
     // Reset while upgraded, with live effects, held input, pending placement and elapsed backlog.

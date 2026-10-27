@@ -124,10 +124,10 @@ fn a_thirteen_cell_interior_keeps_complete_footprints_and_blasts_inside_every_co
             assert!(game.bomb().is_none());
             let blast = &game.blasts()[0];
             assert_eq!(blast.origin(), origin);
-            assert_eq!(blast.cells().len(), 25); // two full thirteen-Cell edges, one shared origin
+            assert_eq!(blast.cells().count(), 25); // two full thirteen-Cell edges, one shared origin
             for (cell, _) in game.arena().cells() {
                 let on_ray = cell.column().value() == corner.0 || cell.row().value() == corner.1;
-                assert_eq!(blast.cells().contains(&cell), on_ray, "cell={cell:?}");
+                assert_eq!(blast.contains(cell), on_ray, "cell={cell:?}");
             }
         }
     }

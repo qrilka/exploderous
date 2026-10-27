@@ -79,7 +79,7 @@ fn cardinal_rays_preserve_requested_reach_and_span_each_arena_axis() {
         let mut game = Game::new(initial, crate::game::Tick::new(0));
         game.step(&[action(None, true)]).unwrap();
         game.step(&[]).unwrap();
-        let coverage = game.blasts()[0].cells();
+        let coverage = game.blasts()[0].cells().collect::<Vec<_>>();
         assert_eq!(
             coverage.len(),
             expected.len(),
